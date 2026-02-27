@@ -1,0 +1,50 @@
+name: Generar Flyers Automaticamente
+
+on:
+  schedule:
+    # 20:00 UTC es 15:00 (3 PM) hora Perú
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar librerias
+        run: pip install pandas requests Pillow gspread oauth2client
+
+      - name: Ejecutar Script de Flyers
+        env:
+          GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
+        run: python generar_flyers.py
+
+      # --- NUEVO PASO: GUARDAR LOS PDF EN EL REPOSITORIO ---
+      - name: Commit y Push de cambios
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/flyers/*.pdf
+          git commit -m "Update Flyers: $(date +'%Y-%m-%d %H:%M')" || echo "No hay cambios para commitear"
+          git push
+
+      - name: Subir a GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'docs/'
+
+      - name: Desplegar
+        uses: actions/deploy-pages@v4
