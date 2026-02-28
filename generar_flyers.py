@@ -175,14 +175,15 @@ def procesar_tienda(nombre_tienda, grupo):
         paginas.append(img_f.convert("RGB"))
     
     if paginas:
-        t_clean = "".join(x for x in str(nombre_tienda) if x.isalnum() or x in " -_")
+        # CAMBIO: Reemplazamos espacios por guiones bajos para máxima compatibilidad web
+        t_clean = "".join(x for x in str(nombre_tienda) if x.isalnum() or x in " -_").strip().replace(" ", "_")
         pdf_fn = f"LENTO_{t_clean}.pdf"
+        
         pdf_path = os.path.join(output_dir, pdf_fn)
         paginas[0].save(pdf_path, save_all=True, append_images=paginas[1:])
         
-        # --- IMPLEMENTACIÓN DE MEDICIÓN DE APERTURAS DIRECTAS ---
+        # Codificamos para la URL segura
         pdf_fn_encoded = urllib.parse.quote(pdf_fn)
-        # Cambiamos el link directo al PDF por el link al visor con el parámetro del archivo
         url_rastreable = f"https://{USUARIO_GITHUB}.github.io/{REPO_NOMBRE}/view.html?file={pdf_fn_encoded}"
         
         return [nombre_tienda, url_rastreable]

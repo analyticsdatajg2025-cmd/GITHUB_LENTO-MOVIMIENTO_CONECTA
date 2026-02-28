@@ -1,32 +1,41 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
     <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
     new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
     j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-    })(window,document,'script','dataLayer','GTM-NWJT3NS');</script> <title>Catálogo Digital - Grupo EFE</title>
+    })(window,document,'script','dataLayer','GTM-NWJT3NS');</script>
+    
+    <meta charset="UTF-8">
+    <title>Catálogo Digital - Grupo EFE</title>
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: #333; }
-        iframe { width: 100%; height: 100vh; border: none; }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #333; }
+        iframe { width: 100%; height: 100vh; border: none; display: block; }
     </style>
 </head>
 <body>
     <iframe id="pdf-viewer"></iframe>
+
     <script>
-        const params = new URLSearchParams(window.location.search);
-        const fileName = params.get('file');
+        const urlParams = new URLSearchParams(window.location.search);
+        let fileName = urlParams.get('file');
         
         if (fileName) {
-            // El decodeURIComponent es para que acepte espacios y tildes del nombre del archivo
-            document.getElementById('pdf-viewer').src = "./flyers/" + decodeURIComponent(fileName);
+            // Limpiamos posibles comillas o espacios extra de la URL
+            fileName = decodeURIComponent(fileName).trim();
             
-            // OPCIONAL: Si quieres enviar el evento directo sin configurar nada en GTM:
+            // Cargamos el PDF desde la subcarpeta flyers
+            document.getElementById('pdf-viewer').src = "./flyers/" + fileName;
+            
+            // Registro en DataLayer para GTM
             window.dataLayer = window.dataLayer || [];
             window.dataLayer.push({
                 'event': 'pdf_view_direct',
                 'pdf_name': fileName
             });
+        } else {
+            document.body.innerHTML = "<h1 style='color:white; text-align:center; padding-top:20%;'>Error: Archivo no especificado.</h1>";
         }
     </script>
 </body>
