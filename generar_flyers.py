@@ -156,7 +156,7 @@ def crear_flyer(productos, tienda_nombre, flyer_count):
             ty += f_size + 5
             
         # SKU (Ubicado en la parte inferior del recuadro blanco)
-        sku_val = f"SKU: {prod['SKU']}"
+        sku_val = str(prod['SKU'])
         rec_color_sku = EFE_NARANJA if es_efe else NEGRO
         draw.rounded_rectangle([tx - 20, y + 620, tx + area_texto_w, y + 710], radius=20, fill=rec_color_sku)
         tw_sku = draw.textlength(sku_val, font=f_sku_prod)
