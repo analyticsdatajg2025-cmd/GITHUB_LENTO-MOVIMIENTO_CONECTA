@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cargando Catálogo...</title>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+        iframe { width: 100%; height: 100%; border: none; }
+    </style>
+</head>
+<body>
+    <iframe id="pdf-viewer"></iframe>
+    <script>
+        // Extrae el nombre del archivo de la URL: view.html?file=PDF_Abancay.pdf
+        const params = new URLSearchParams(window.location.search);
+        const fileName = params.get('file');
+        
+        if (fileName) {
+            // Carga el PDF en el iframe
+            document.getElementById('pdf-viewer').src = "./flyers/" + fileName;
+            
+            // Enviamos el evento a GA4 manualmente si no quieres usar GTM aquí
+            // gtag('event', 'pdf_open_direct', { 'file_name': fileName });
+        }
+    </script>
+</body>
+</html>

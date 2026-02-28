@@ -179,13 +179,7 @@ def procesar_tienda(nombre_tienda, grupo):
         pdf_fn = f"LENTO_{t_clean}.pdf"
         pdf_path = os.path.join(output_dir, pdf_fn)
         paginas[0].save(pdf_path, save_all=True, append_images=paginas[1:])
-        
-        # --- IMPLEMENTACIÓN DE MEDICIÓN DE APERTURAS DIRECTAS ---
-        pdf_fn_encoded = urllib.parse.quote(pdf_fn)
-        # Cambiamos el link directo al PDF por el link al visor con el parámetro del archivo
-        url_rastreable = f"https://{USUARIO_GITHUB}.github.io/{REPO_NOMBRE}/view.html?file={pdf_fn_encoded}"
-        
-        return [nombre_tienda, url_rastreable]
+        return [nombre_tienda, f"{URL_BASE_PAGES}{urllib.parse.quote(pdf_fn)}"]
     return None
 
 # --- FLUJO PRINCIPAL ---
