@@ -8,7 +8,7 @@
     })(window,document,'script','dataLayer','GTM-NWJT3NS');</script>
     
     <meta charset="UTF-8">
-    <title>Catálogo Digital - Grupo EFE</title>
+    <title>Visor de Catálogo - Grupo EFE</title>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background-color: #333; }
         iframe { width: 100%; height: 100vh; border: none; display: block; }
@@ -18,24 +18,28 @@
     <iframe id="pdf-viewer"></iframe>
 
     <script>
+        // 1. Obtenemos el parámetro de la URL
         const urlParams = new URLSearchParams(window.location.search);
         let fileName = urlParams.get('file');
         
         if (fileName) {
-            // Limpiamos posibles comillas o espacios extra de la URL
+            // 2. Limpiamos el nombre (importante para evitar errores de red)
             fileName = decodeURIComponent(fileName).trim();
             
-            // Cargamos el PDF desde la subcarpeta flyers
-            document.getElementById('pdf-viewer').src = "./flyers/" + fileName;
+            // 3. LA RUTA CLAVE: view.html está en docs/ y el PDF en docs/flyers/
+            // Por eso usamos "./flyers/" para entrar a la subcarpeta
+            const pdfPath = "./flyers/" + fileName;
             
-            // Registro en DataLayer para GTM
+            document.getElementById('pdf-viewer').src = pdfPath;
+            
+            // 4. Medición Martech para GTM/GA4
             window.dataLayer = window.dataLayer || [];
             window.dataLayer.push({
                 'event': 'pdf_view_direct',
                 'pdf_name': fileName
             });
         } else {
-            document.body.innerHTML = "<h1 style='color:white; text-align:center; padding-top:20%;'>Error: Archivo no especificado.</h1>";
+            document.body.innerHTML = "<h1 style='color:white; text-align:center; margin-top:100px;'>Error: No se encontró el archivo.</h1>";
         }
     </script>
 </body>
