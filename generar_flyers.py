@@ -17,7 +17,6 @@ ANCHO, ALTO = 2500, 3750
 SHEET_ID = "1NQdhnPxgVe6N6LiVxh1ouzt5NHtqjR22EEqL6w1RpWQ"
 USUARIO_GITHUB = "analyticsdatajg2025-cmd" 
 REPO_NOMBRE = "GITHUB_LENTO-MOVIMIENTO_CONECTA"
-# URL Base corregida para GitHub Pages
 URL_BASE_PAGES = f"https://{USUARIO_GITHUB}.github.io/{REPO_NOMBRE}/"
 
 # --- FUENTES ---
@@ -55,7 +54,6 @@ def descargar_imagen(url):
 
 def formatear_stock(valor):
     try:
-        # Convertir a flotante, luego a entero para quitar el .0 y aplicar formato de miles con coma
         n = int(float(valor))
         return "{:,}".format(n)
     except:
@@ -149,24 +147,28 @@ def crear_flyer(productos, tienda_nombre):
             draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 60), fill=NEGRO)
             ty += 65
 
-        # Stock Box (Mismo ancho que SKU)
-        ty_stock = y + 400
-        draw.rounded_rectangle([tx, ty_stock, tx + area_w, ty_stock + 200], radius=25, fill=color_slogan_bg)
+        # --- BLOQUES FUSIONADOS (STOCK + SKU) ---
+        ty_stock = y + 420
+        h_stock = 180
+        # Stock: Redondeado arriba, recto abajo
+        draw.rounded_rectangle([tx, ty_stock, tx + area_w, ty_stock + h_stock], radius=25, fill=color_slogan_bg)
+        draw.rectangle([tx, ty_stock + h_stock - 30, tx + area_w, ty_stock + h_stock], fill=color_slogan_bg)
         
-        # Centrar texto "STOCK"
+        # Textos Stock Centrados
         txt_s = "STOCK"
-        tw_s = draw.textlength(txt_s, font=f_stock_label)
-        draw.text((tx + (area_w - tw_s)//2, ty_stock + 15), txt_s, font=f_stock_label, fill=BLANCO if es_efe else NEGRO)
-        
-        # Centrar valor numérico formateado
+        draw.text((tx + (area_w - draw.textlength(txt_s, f_stock_label))//2, ty_stock + 15), txt_s, font=f_stock_label, fill=BLANCO if es_efe else NEGRO)
         stock_n = formatear_stock(prod['Stock LM'])
-        tw_n = draw.textlength(stock_n, font=f_stock_val)
-        draw.text((tx + (area_w - tw_n)//2, ty_stock + 65), stock_n, font=f_stock_val, fill=BLANCO if es_efe else NEGRO)
+        draw.text((tx + (area_w - draw.textlength(stock_n, f_stock_val))//2, ty_stock + 60), stock_n, font=f_stock_val, fill=BLANCO if es_efe else NEGRO)
 
-        # SKU Box
+        # SKU: Recto arriba, redondeado abajo
+        ty_sku = ty_stock + h_stock
+        h_sku = 85
+        sku_color = NEGRO if not es_efe else EFE_NARANJA
+        draw.rounded_rectangle([tx, ty_sku, tx + area_w, ty_sku + h_sku], radius=20, fill=sku_color)
+        draw.rectangle([tx, ty_sku, tx + area_w, ty_sku + 30], fill=sku_color)
+        
         sku_val = str(prod['SKU'])
-        draw.rounded_rectangle([tx, y + 630, tx + area_w, y + 710], radius=20, fill=NEGRO if not es_efe else EFE_NARANJA)
-        draw.text((tx + (area_w - draw.textlength(sku_val, f_sku))//2, y + 645), sku_val, font=f_sku, fill=BLANCO)
+        draw.text((tx + (area_w - draw.textlength(sku_val, f_sku))//2, ty_sku + 15), sku_val, font=f_sku, fill=BLANCO)
 
     return flyer
 
@@ -177,7 +179,7 @@ print(f"Iniciando proceso para {semana_actual}...")
 ws_origen = ss.worksheet("Origen Tdas")
 df_raw = pd.DataFrame(ws_origen.get_all_records())
 
-# Mapeo por posición (B, D, G, H, I, L)
+# Mapeo por posición
 df_origen = pd.DataFrame()
 df_origen['Semana'] = df_raw.iloc[:, 1]
 df_origen['Tienda'] = df_raw.iloc[:, 3]
@@ -188,19 +190,16 @@ df_origen['Stock LM'] = df_raw.iloc[:, 11]
 
 df_lookup = pd.DataFrame(ss.worksheet("listado_productos").get_all_records())
 
-# Filtros
 df_origen['Stock LM_NUM'] = pd.to_numeric(df_origen['Stock LM'], errors='coerce').fillna(0)
 df_filtered = df_origen[
     (df_origen['Semana'].astype(str) == semana_actual) & 
     (df_origen['Stock LM_NUM'] > 0)
 ].copy()
 
-# Imágenes
 df_filtered['SKU_CLEAN'] = df_filtered['SKU'].astype(str).str.replace('-EX', '', case=False).str.strip()
 img_map = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_filtered['image_link'] = df_filtered['SKU_CLEAN'].map(img_map).fillna('')
 
-# Actualizar Detalle
 ws_det = ss.worksheet("Detalle de Inventario")
 ws_det.clear()
 ws_det.update([df_filtered.columns.values.tolist()] + df_filtered.astype(str).values.tolist(), range_name='A1')
@@ -217,7 +216,6 @@ with ThreadPoolExecutor(max_workers=4) as exe:
             pdf_fn = f"LENTO_{t_clean}.pdf"
             img_res.convert("RGB").save(os.path.join(output_dir, pdf_fn))
             
-            # Link rastreable vía view.html
             pdf_encoded = urllib.parse.quote(pdf_fn)
             url_final = f"{URL_BASE_PAGES}view.html?file={pdf_encoded}"
             tienda_links.append([tienda, url_final])
