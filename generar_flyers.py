@@ -159,6 +159,7 @@ def crear_flyer(productos, tienda_nombre):
 
     return flyer
 
+
 # --- FLUJO ---
 ss = conectar_sheets()
 print(f"Filtrando datos para: {semana_actual}")
