@@ -78,7 +78,8 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
         bg_path = "efe tienda.jpg" if es_efe else "LC-MIRAFLORES-LOGO-3D[2].jpg"
         bg = ImageOps.fit(Image.open(bg_path).convert("RGBA"), (ANCHO, 1000), method=Image.Resampling.LANCZOS)
         flyer.paste(bg, (0, 0))
-        flyer.paste(Image.new('RGBA', (ANCHO, 1000), (0, 0, 0, 60)), (0, 0), Image.new('RGBA', (ANCHO, 1000), (0, 0, 0, 60)))
+        overlay = Image.new('RGBA', (ANCHO, 1000), (0, 0, 0, 60))
+        flyer.paste(overlay, (0, 0), overlay)
         
         logo_path = "logo-efe-sin-fondo.png" if es_efe else "logo-lc-sin-fondo.png"
         logo = Image.open(logo_path).convert("RGBA")
@@ -151,22 +152,25 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
         
         p_val = formatear_precio_lento(prod.get('Precio Vigente', '0'))
         if p_val == "SIN PRECIO":
-            draw.text((tx + (area_w - draw.textlength(p_val, ImageFont.truetype(FONT_EXTRABOLD, 80)))//2, ty_p+50), p_val, font=ImageFont.truetype(FONT_EXTRABOLD, 80), fill=BLANCO if es_efe else NEGRO)
+            f_sp = ImageFont.truetype(FONT_EXTRABOLD, 80)
+            draw.text((tx + (area_w - draw.textlength(p_val, f_sp))//2, ty_p+50), p_val, font=f_sp, fill=BLANCO if es_efe else NEGRO)
         else:
             f_p = ImageFont.truetype(FONT_EXTRABOLD, 120)
             while draw.textlength(f"S/ {p_val}", f_p) > area_w - 40:
                 f_p = ImageFont.truetype(FONT_EXTRABOLD, f_p.size - 5)
-            full_w = draw.textlength("S/ ", ImageFont.truetype(FONT_BOLD_COND, 65)) + draw.textlength(p_val, f_p)
+            f_s_simb = ImageFont.truetype(FONT_BOLD_COND, 65)
+            full_w = draw.textlength("S/ ", f_s_simb) + draw.textlength(p_val, f_p)
             st_x = tx + (area_w - full_w)//2
-            draw.text((st_x, ty_p+55), "S/ ", font=ImageFont.truetype(FONT_BOLD_COND, 65), fill=BLANCO if es_efe else NEGRO)
-            draw.text((st_x + draw.textlength("S/ ", ImageFont.truetype(FONT_BOLD_COND, 65)), ty_p+35), p_val, font=f_p, fill=BLANCO if es_efe else NEGRO)
+            draw.text((st_x, ty_p+55), "S/ ", font=f_s_simb, fill=BLANCO if es_efe else NEGRO)
+            draw.text((st_x + draw.textlength("S/ ", f_s_simb), ty_p+35), p_val, font=f_p, fill=BLANCO if es_efe else NEGRO)
 
         ty_sku = ty_p + h_p
         sku_c = NEGRO if not es_efe else EFE_NARANJA
         draw.rounded_rectangle([tx, ty_sku, tx+area_w, ty_sku+85], radius=20, fill=sku_c)
         draw.rectangle([tx, ty_sku, tx+area_w, ty_sku+30], fill=sku_c)
         sku_txt = str(prod['SKU'])
-        draw.text((tx+(area_w-draw.textlength(sku_txt, ImageFont.truetype(FONT_BOLD_COND, 55)))//2, ty_sku+15), sku_txt, font=ImageFont.truetype(FONT_BOLD_COND, 55), fill=BLANCO)
+        f_sku_font = ImageFont.truetype(FONT_BOLD_COND, 55)
+        draw.text((tx+(area_w-draw.textlength(sku_txt, f_sku_font))//2, ty_sku+15), sku_txt, font=f_sku_font, fill=BLANCO)
 
     return flyer
 
@@ -178,7 +182,9 @@ def procesar_tienda_multipagina(nombre, df_tienda):
         paginas.append(crear_pagina_flyer(lista_prods[i:i+6], str(nombre), (i//6)+1).convert("RGB"))
     
     if paginas:
-        fn = f"LENTO_{"".join(c for c in nombre if c.isalnum() or c in " -_").strip().replace(" ", "_")}.pdf"
+        # Limpieza de nombre de archivo corregida para evitar errores de f-string
+        clean_name = "".join(c for c in nombre if c.isalnum() or c in " -_").strip().replace(" ", "_")
+        fn = f"LENTO_{clean_name}.pdf"
         paginas[0].save(os.path.join(output_dir, fn), save_all=True, append_images=paginas[1:])
         print(f"   [OK] Guardado: {fn}")
         return [nombre, f"{URL_BASE_PAGES}view.html?file={urllib.parse.quote(fn)}"]
@@ -220,12 +226,12 @@ ws_det.update([['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM
 
 print(f">> Generando PDFs para {len(df_final.groupby('Tienda'))} tiendas...")
 tienda_links = []
-with ThreadPoolExecutor(max_workers=2) as exe: # Bajamos workers para ahorrar RAM
+with ThreadPoolExecutor(max_workers=2) as exe:
     futuros = [exe.submit(procesar_tienda_multipagina, n, g) for n, g in df_final.groupby('Tienda') if str(n).strip()]
     for f in futuros:
         res = f.result()
         if res: tienda_links.append(res)
-        gc.collect() # Liberamos RAM tras cada tienda
+        gc.collect()
 
 ss.worksheet("FLYER_TIENDA").clear()
 ss.worksheet("FLYER_TIENDA").update([["TIENDA RETAIL", "LINK PDF LENTO MOVIMIENTO"]] + tienda_links, range_name='A1')
