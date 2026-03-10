@@ -223,22 +223,38 @@ df_promos['LISTA_STR'] = df_promos['Lista Precios'].astype(str).str.zfill(2)
 df_origen['LISTA_STR'] = df_origen['LISTA'].astype(str).str.zfill(2)
 df_master = df_origen.merge(df_promos, left_on=['LISTA_STR', 'SKU'], right_on=['LISTA_STR', 'SKU'], how='left')
 
+# --- REEMPLAZA ESTA SECCIÓN EN TU CÓDIGO ---
+
 # 4. Imágenes y Limpieza
 df_lookup = pd.DataFrame(ss.worksheet("listado_productos").get_all_records())
 df_master['SKU_CLEAN'] = df_master['SKU'].astype(str).str.replace('-EX', '', case=False).str.strip()
 img_map = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_master['image_link'] = df_master['SKU_CLEAN'].map(img_map).fillna('')
 
+# Convertir Stock a numérico y manejar errores
 df_master['Stock LM_NUM'] = pd.to_numeric(df_master['Stock LM'], errors='coerce').fillna(0)
+
+# Filtrar por Semana y Stock
 df_final = df_master[
     (df_master['Semana'].astype(str) == semana_actual) & (df_master['Stock LM_NUM'] > 0)
 ].copy()
 
-# Guardar Tabla Maestra
+# --- SOLUCIÓN AL ERROR JSON ---
+# Rellenamos cualquier valor nulo (NaN) con una cadena vacía antes de subir a Sheets
+df_final = df_final.fillna("")
+
+# Guardar Tabla Maestra en Detalle de Inventario
 ws_det = ss.worksheet("Detalle de Inventario")
 ws_det.clear()
+
+# Definimos el orden de las columnas
 col_order = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'SKU_CLEAN', 'image_link']
-ws_det.update([col_order] + df_final[col_order].astype(str).values.tolist(), range_name='A1')
+
+# Convertimos explícitamente a lista de strings para evitar valores "out of range"
+valores_a_subir = [col_order] + df_final[col_order].astype(str).values.tolist()
+
+# Actualizamos la hoja
+ws_det.update(valores_a_subir, range_name='A1')
 
 # --- GENERACIÓN DE PDFS ---
 tienda_links = []
@@ -255,4 +271,4 @@ with ThreadPoolExecutor(max_workers=4) as exe:
 
 ss.worksheet("FLYER_TIENDA").clear()
 ss.worksheet("FLYER_TIENDA").update([["TIENDA RETAIL", "LINK PDF LENTO MOVIMIENTO"]] + tienda_links, range_name='A1')
-print("¡Proceso finalizado!")
+print("¡Proceso finalizado!") 
