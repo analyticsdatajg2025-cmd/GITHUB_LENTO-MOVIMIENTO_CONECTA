@@ -53,12 +53,12 @@ def descargar_imagen(url):
     except: return None
 
 def formatear_precio_lento(valor):
+    """Quita el .00 y maneja productos sin precio"""
     try:
-        if not valor or str(valor).strip() in ["", "-", "0", "0.00"]: return "SIN PRECIO"
+        if not valor or str(valor).strip() in ["", "-", "0", "0.00", "nan"]: return "SIN PRECIO"
         s = str(valor).replace("S/.", "").replace("S/", "").replace(",", "").strip()
         f = float(s)
-        # Formato con miles sin decimales
-        return "{:,.0f}".format(f)
+        return "{:,.0f}".format(f) # Sin decimales
     except: return "SIN PRECIO"
 
 def normalizar_nombre_tienda(nombre):
@@ -77,6 +77,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
     flyer = Image.new('RGB', (ANCHO, ALTO), color=color_fondo)
     draw = ImageDraw.Draw(flyer)
     
+    # Background Header
     try:
         bg = ImageOps.fit(Image.open(tienda_bg_path).convert("RGBA"), (ANCHO, 1000), method=Image.Resampling.LANCZOS)
         flyer.paste(bg, (0, 0))
@@ -84,6 +85,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
         flyer.paste(overlay, (0, 0), overlay)
     except: pass
 
+    # Logo
     try:
         logo = Image.open(logo_path).convert("RGBA")
         if es_efe:
@@ -99,6 +101,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
             flyer.paste(logo, (ANCHO-c_w-80 + (c_w-logo.width)//2, (c_h-logo.height)//2 + 10), logo)
     except: pass
 
+    # Titulo Tienda con Página
     f_tienda = ImageFont.truetype(FONT_EXTRABOLD_COND, 90)
     txt_tienda = f"{tienda_nombre.upper()} - PÁG {num_pag}"
     tw_t = draw.textlength(txt_tienda, font=f_tienda)
@@ -110,6 +113,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
         draw.polygon([(ANCHO-tw_t-250, 720), (ANCHO-tw_t-150, 520), (ANCHO, 520), (ANCHO, 720)], fill=NEGRO)
         draw.text((ANCHO-tw_t-100, 570), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
 
+    # Fecha
     f_fecha = ImageFont.truetype(FONT_BOLD_COND, 45)
     txt_gen = f"Generado: {fecha_peru}"
     tw_g = draw.textlength(txt_gen, font=f_fecha)
@@ -117,6 +121,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
     draw.rectangle([0, 850, 50, 960], fill=BLANCO)
     draw.text((40, 880), txt_gen, font=f_fecha, fill=NEGRO)
 
+    # Slogan
     f_slogan = ImageFont.truetype(FONT_EXTRABOLD, 105)
     slogan_txt = "¡APROVECHA ESTAS INCREÍBLES OFERTAS!"
     draw.rectangle([0, 1030, ANCHO, 1260], fill=color_slogan_bg)
@@ -131,7 +136,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
-        # --- TAG STOCK SIN FORMATO ---
+        # --- STOCK (Formato Original) ---
         stock_clean = str(prod.get('Stock LM', '0'))
         f_stock_label = ImageFont.truetype(FONT_BOLD_COND, 30)
         f_stock_num = ImageFont.truetype(FONT_EXTRABOLD, 50)
@@ -158,7 +163,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
             draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 60), fill=NEGRO)
             ty += 65
 
-        # --- PRECIO (PAGINADO) ---
+        # --- PRECIO DINÁMICO ---
         ty_p = y + 420
         h_p = 180
         draw.rounded_rectangle([tx, ty_p, tx + area_w, ty_p + h_p], radius=25, fill=color_slogan_bg)
@@ -182,6 +187,7 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
             draw.text((start_px, ty_p + 55), "S/ ", font=f_simbolo, fill=BLANCO if es_efe else NEGRO)
             draw.text((start_px + draw.textlength("S/ ", f_simbolo), ty_p + 35), precio_val, font=f_p, fill=BLANCO if es_efe else NEGRO)
 
+        # SKU Fusionado
         ty_sku = ty_p + h_p
         sku_color = NEGRO if not es_efe else EFE_NARANJA
         draw.rounded_rectangle([tx, ty_sku, tx + area_w, ty_sku + 85], radius=20, fill=sku_color)
@@ -191,85 +197,74 @@ def crear_pagina_flyer(productos, tienda_nombre, num_pag):
 
     return flyer
 
-def procesar_tienda_paginado(nombre_tienda, datos_tienda):
-    print(f"Procesando {nombre_tienda}: {len(datos_tienda)} productos")
-    paginas_img = []
-    lista_productos = datos_tienda.to_dict('records')
+def procesar_tienda_multipagina(nombre, df_tienda):
+    paginas = []
+    lista_prods = df_tienda.to_dict('records')
+    for i in range(0, len(lista_prods), 6):
+        bloque = lista_prods[i:i+6]
+        img_pag = crear_pagina_flyer(bloque, str(nombre), (i//6)+1)
+        paginas.append(img_pag.convert("RGB"))
     
-    # Dividir en bloques de 6
-    for i in range(0, len(lista_productos), 6):
-        bloque = lista_productos[i:i+6]
-        img_pag = crear_pagina_flyer(bloque, str(nombre_tienda), (i//6)+1)
-        paginas_img.append(img_pag.convert("RGB"))
-        
-    if paginas_img:
-        t_clean = "".join(c for c in nombre_tienda if c.isalnum() or c in " -_").strip().replace(" ", "_")
-        pdf_fn = f"LENTO_{t_clean}.pdf"
-        pdf_path = os.path.join(output_dir, pdf_fn)
-        # Guardar todas las páginas en un solo PDF
-        paginas_img[0].save(pdf_path, save_all=True, append_images=paginas_img[1:])
-        
-        pdf_encoded = urllib.parse.quote(pdf_fn)
-        return [nombre_tienda, f"{URL_BASE_PAGES}view.html?file={pdf_encoded}"]
+    if paginas:
+        t_clean = "".join(c for c in nombre if c.isalnum() or c in " -_").strip().replace(" ", "_")
+        fn = f"LENTO_{t_clean}.pdf"
+        path = os.path.join(output_dir, fn)
+        paginas[0].save(path, save_all=True, append_images=paginas[1:])
+        return [nombre, f"{URL_BASE_PAGES}view.html?file={urllib.parse.quote(fn)}"]
     return None
 
-# --- FLUJO DE DATOS ---
+# --- FLUJO ---
 ss = conectar_sheets()
-print("Sincronizando Tabla Maestra...")
+print("Sincronizando datos...")
 
-# 1. Extracción Origen
+# 1. Origen
 df_raw = pd.DataFrame(ss.worksheet("Origen Tdas").get_all_records())
 df_origen = pd.DataFrame({
     'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3],
     'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7],
     'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]
 })
-df_origen['TIENDA_KEY'] = df_origen['Tienda'].apply(normalizar_nombre_tienda)
+df_origen['T_KEY'] = df_origen['Tienda'].apply(normalizar_nombre_tienda)
 
-# 2. Match de Listas
+# 2. Match Listas
 df_txl = pd.DataFrame(ss.worksheet("TiendasxLista").get_all_records())
 df_txl.columns = df_txl.columns.str.strip().str.upper()
 df_txl['LISTA'] = pd.to_numeric(df_txl['LISTA'], errors='coerce').fillna(0).astype(int).astype(str)
-df_txl['TIENDA_KEY'] = df_txl['TIENDA'].apply(normalizar_nombre_tienda)
-df_origen = df_origen.merge(df_txl[['TIENDA_KEY', 'LISTA']], on='TIENDA_KEY', how='left')
+df_txl['T_KEY'] = df_txl['TIENDA'].apply(normalizar_nombre_tienda)
+df_origen = df_origen.merge(df_txl[['T_KEY', 'LISTA']], on='T_KEY', how='left')
 
-# 3. Cruce con Promos
+# 3. Promos
 promos = []
-for p_sheet in ["Promo01", "Promo03", "Promo04"]:
-    temp = pd.DataFrame(ss.worksheet(p_sheet).get_all_records())
-    temp.columns = temp.columns.str.strip()
-    temp['Lista Precios'] = pd.to_numeric(temp['Lista Precios'], errors='coerce').fillna(0).astype(int).astype(str)
-    promos.append(temp[['Lista Precios', 'SKU', 'Precio Vigente']])
-df_promos = pd.concat(promos).drop_duplicates(subset=['Lista Precios', 'SKU'])
-df_master = df_origen.merge(df_promos, left_on=['LISTA', 'SKU'], right_on=['Lista Precios', 'SKU'], how='left')
+for p in ["Promo01", "Promo03", "Promo04"]:
+    t = pd.DataFrame(ss.worksheet(p).get_all_records())
+    t.columns = t.columns.str.strip()
+    t['Lista Precios'] = pd.to_numeric(t['Lista Precios'], errors='coerce').fillna(0).astype(int).astype(str)
+    promos.append(t[['Lista Precios', 'SKU', 'Precio Vigente']])
+df_master = df_origen.merge(pd.concat(promos).drop_duplicates(subset=['Lista Precios', 'SKU']), 
+                           left_on=['LISTA', 'SKU'], right_on=['Lista Precios', 'SKU'], how='left')
 
-# 4. Imágenes
-df_lookup = pd.DataFrame(ss.worksheet("listado_productos").get_all_records())
+# 4. Imagenes
 df_master['SKU_CLEAN'] = df_master['SKU'].astype(str).str.replace('-EX', '', case=False).str.strip()
-df_master['image_link'] = df_master['SKU_CLEAN'].map(df_lookup.set_index('sku')['base_image_path'].to_dict()).fillna('')
+df_master['image_link'] = df_master['SKU_CLEAN'].map(pd.DataFrame(ss.worksheet("listado_productos").get_all_records()).set_index('sku')['base_image_path'].to_dict()).fillna('')
 
-# 5. Filtrado Final
-# No convertimos Stock LM a número para preservar formato original (ej. 6.180)
-df_final = df_master[df_master['Semana'].astype(str) == semana_actual].copy()
-df_final = df_final.fillna("")
+# 5. Filtrado
+df_final = df_master[df_master['Semana'].astype(str) == semana_actual].copy().fillna("")
 
-# Actualizar Hoja Detalle
+# Detalle
 ws_det = ss.worksheet("Detalle de Inventario")
 ws_det.clear()
 cols = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'SKU_CLEAN', 'image_link']
 ws_det.update([cols] + df_final[cols].astype(str).values.tolist(), range_name='A1')
 
-# --- GENERACIÓN MULTI-PÁGINA ---
+# PDFs
 tienda_links = []
 with ThreadPoolExecutor(max_workers=4) as exe:
     grupos = df_final.groupby('Tienda')
-    futuros = [exe.submit(procesar_tienda_paginado, n, g) for n, g in grupos if str(n).strip()]
+    futuros = [exe.submit(procesar_tienda_multipagina, n, g) for n, g in grupos if str(n).strip()]
     for f in futuros:
-        res = f.result()
-        if res: tienda_links.append(res)
+        r = f.result()
+        if r: tienda_links.append(r)
 
-# Tabla Maestra de Links
 ss.worksheet("FLYER_TIENDA").clear()
 ss.worksheet("FLYER_TIENDA").update([["TIENDA RETAIL", "LINK PDF LENTO MOVIMIENTO"]] + tienda_links, range_name='A1')
-
-print("¡Proceso finalizado con PDFs multi-página!")
+print("¡Completado!")
