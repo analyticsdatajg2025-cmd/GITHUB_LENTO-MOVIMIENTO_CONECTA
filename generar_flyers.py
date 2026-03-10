@@ -61,16 +61,11 @@ def formatear_precio(valor):
     except: return "0.00"
 
 def normalizar_nombre_tienda(nombre):
-    """
-    Transforma 'Tumbes - EFE' o 'EFE TUMBES' en 'EFETUMBES'
-    """
+    """ Estandariza nombres: 'Abancay - EFE' -> 'EFEABANCAY' """
     s = str(nombre).upper().replace(" ", "").replace("-", "")
-    if "EFE" in s:
-        ciudad = s.replace("EFE", "")
-        return f"EFE{ciudad}"
-    if "LC" in s:
-        ciudad = s.replace("LC", "")
-        return f"LC{ciudad}"
+    # Si el formato es CIUDADEFE, lo movemos a EFECIUDAD para el match
+    if s.endswith("EFE"): s = "EFE" + s[:-3]
+    if s.endswith("LC"): s = "LC" + s[:-2]
     return s
 
 def crear_flyer(productos, tienda_nombre):
@@ -90,6 +85,8 @@ def crear_flyer(productos, tienda_nombre):
         flyer.paste(overlay, (0, 0), overlay)
     except: pass
 
+    # Logo, Tienda, Fecha y Slogan (se mantienen igual)...
+    # [Omitido por brevedad para enfocar en los cambios solicitados]
     try:
         logo = Image.open(logo_path).convert("RGBA")
         if es_efe:
@@ -138,14 +135,26 @@ def crear_flyer(productos, tienda_nombre):
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
-        # --- TAG STOCK (Superior Izquierda) ---
-        stock_val = str(prod.get('Stock LM', '0'))
-        f_stock = ImageFont.truetype(FONT_BOLD_COND, 40)
-        tw_s = draw.textlength(f"STOCK: {stock_val}", f_stock)
+        # --- TAG STOCK CORREGIDO ---
+        try:
+            stock_clean = str(int(float(prod.get('Stock LM', 0))))
+        except:
+            stock_clean = str(prod.get('Stock LM', '0'))
+
+        f_stock_label = ImageFont.truetype(FONT_BOLD_COND, 30)
+        f_stock_num = ImageFont.truetype(FONT_EXTRABOLD, 50)
+        
+        tw_label = draw.textlength("STOCK", f_stock_label)
+        tw_num = draw.textlength(stock_clean, f_stock_num)
+        max_tw = max(tw_label, tw_num) + 40
+        
         box_color = EFE_AZUL if es_efe else LC_AMARILLO
         txt_color = BLANCO if es_efe else NEGRO
-        draw.rounded_rectangle([x+30, y+30, x+30+tw_s+40, y+90], radius=15, fill=box_color)
-        draw.text((x+50, y+40), f"STOCK: {stock_val}", font=f_stock, fill=txt_color)
+        draw.rounded_rectangle([x+30, y+30, x+30+max_tw, y+140], radius=15, fill=box_color)
+        # Palabra Arriba
+        draw.text((x+30 + (max_tw-tw_label)//2, y+40), "STOCK", font=f_stock_label, fill=txt_color)
+        # Numero Debajo
+        draw.text((x+30 + (max_tw-tw_num)//2, y+75), stock_clean, font=f_stock_num, fill=txt_color)
 
         img_p = descargar_imagen(prod.get('image_link'))
         if img_p:
@@ -168,7 +177,7 @@ def crear_flyer(productos, tienda_nombre):
         draw.rectangle([tx, ty_p + h_p - 30, tx + area_w, ty_p + h_p], fill=color_slogan_bg) 
         
         precio_val = formatear_precio(prod.get('Precio Vigente', '0.00'))
-        f_p_size = 120
+        f_p_size = 110
         f_p = ImageFont.truetype(FONT_EXTRABOLD, f_p_size)
         while draw.textlength(f"S/ {precio_val}", f_p) > area_w - 40:
             f_p_size -= 5
@@ -199,12 +208,12 @@ df_origen = pd.DataFrame({
     'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7],
     'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]
 })
-# Normalización para Match
 df_origen['TIENDA_KEY'] = df_origen['Tienda'].apply(normalizar_nombre_tienda)
 
-# 2. TiendasxLista
+# 2. TiendasxLista (Limpieza de .0)
 df_txl = pd.DataFrame(ss.worksheet("TiendasxLista").get_all_records())
 df_txl.columns = df_txl.columns.str.strip().str.upper()
+df_txl['LISTA'] = pd.to_numeric(df_txl['LISTA'], errors='coerce').fillna(0).astype(int).astype(str)
 df_txl['TIENDA_KEY'] = df_txl['TIENDA'].apply(normalizar_nombre_tienda)
 
 # Merge 1: Obtener LISTA
@@ -215,15 +224,13 @@ promos = []
 for p_sheet in ["Promo01", "Promo03", "Promo04"]:
     temp = pd.DataFrame(ss.worksheet(p_sheet).get_all_records())
     temp.columns = temp.columns.str.strip()
+    # Estandarizar Lista Precios a texto (ej: "4")
+    temp['Lista Precios'] = pd.to_numeric(temp['Lista Precios'], errors='coerce').fillna(0).astype(int).astype(str)
     promos.append(temp[['Lista Precios', 'SKU', 'Precio Vigente']])
 df_promos = pd.concat(promos).drop_duplicates(subset=['Lista Precios', 'SKU'])
-df_promos['LISTA_STR'] = df_promos['Lista Precios'].astype(str).str.zfill(2)
 
-# Merge 2: Obtener Precio
-df_origen['LISTA_STR'] = df_origen['LISTA'].astype(str).str.zfill(2)
-df_master = df_origen.merge(df_promos, left_on=['LISTA_STR', 'SKU'], right_on=['LISTA_STR', 'SKU'], how='left')
-
-# --- REEMPLAZA ESTA SECCIÓN EN TU CÓDIGO ---
+# Merge 2: Obtener Precio usando LISTA limpia
+df_master = df_origen.merge(df_promos, left_on=['LISTA', 'SKU'], right_on=['Lista Precios', 'SKU'], how='left')
 
 # 4. Imágenes y Limpieza
 df_lookup = pd.DataFrame(ss.worksheet("listado_productos").get_all_records())
@@ -231,30 +238,17 @@ df_master['SKU_CLEAN'] = df_master['SKU'].astype(str).str.replace('-EX', '', cas
 img_map = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_master['image_link'] = df_master['SKU_CLEAN'].map(img_map).fillna('')
 
-# Convertir Stock a numérico y manejar errores
 df_master['Stock LM_NUM'] = pd.to_numeric(df_master['Stock LM'], errors='coerce').fillna(0)
-
-# Filtrar por Semana y Stock
 df_final = df_master[
     (df_master['Semana'].astype(str) == semana_actual) & (df_master['Stock LM_NUM'] > 0)
 ].copy()
 
-# --- SOLUCIÓN AL ERROR JSON ---
-# Rellenamos cualquier valor nulo (NaN) con una cadena vacía antes de subir a Sheets
+# Guardar Tabla Maestra
 df_final = df_final.fillna("")
-
-# Guardar Tabla Maestra en Detalle de Inventario
 ws_det = ss.worksheet("Detalle de Inventario")
 ws_det.clear()
-
-# Definimos el orden de las columnas
 col_order = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'SKU_CLEAN', 'image_link']
-
-# Convertimos explícitamente a lista de strings para evitar valores "out of range"
-valores_a_subir = [col_order] + df_final[col_order].astype(str).values.tolist()
-
-# Actualizamos la hoja
-ws_det.update(valores_a_subir, range_name='A1')
+ws_det.update([col_order] + df_final[col_order].astype(str).values.tolist(), range_name='A1')
 
 # --- GENERACIÓN DE PDFS ---
 tienda_links = []
@@ -271,4 +265,4 @@ with ThreadPoolExecutor(max_workers=4) as exe:
 
 ss.worksheet("FLYER_TIENDA").clear()
 ss.worksheet("FLYER_TIENDA").update([["TIENDA RETAIL", "LINK PDF LENTO MOVIMIENTO"]] + tienda_links, range_name='A1')
-print("¡Proceso finalizado!") 
+print("¡Proceso finalizado!")
