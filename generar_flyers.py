@@ -52,12 +52,26 @@ def descargar_imagen(url):
         return Image.open(BytesIO(res.content)).convert("RGBA")
     except: return None
 
-def formatear_stock(valor):
+def formatear_precio(valor):
     try:
-        n = int(float(valor))
-        return "{:,}".format(n)
-    except:
-        return str(valor)
+        if not valor or str(valor).strip() in ["", "-"]: return "0.00"
+        s = str(valor).replace("S/.", "").replace("S/", "").replace(",", "").strip()
+        f = float(s)
+        return "{:,.2f}".format(f)
+    except: return "0.00"
+
+def normalizar_nombre_tienda(nombre):
+    """
+    Transforma 'Tumbes - EFE' o 'EFE TUMBES' en 'EFETUMBES'
+    """
+    s = str(nombre).upper().replace(" ", "").replace("-", "")
+    if "EFE" in s:
+        ciudad = s.replace("EFE", "")
+        return f"EFE{ciudad}"
+    if "LC" in s:
+        ciudad = s.replace("LC", "")
+        return f"LC{ciudad}"
+    return s
 
 def crear_flyer(productos, tienda_nombre):
     es_efe = "EFE" in tienda_nombre.upper()
@@ -76,67 +90,67 @@ def crear_flyer(productos, tienda_nombre):
         flyer.paste(overlay, (0, 0), overlay)
     except: pass
 
-    # Logo
     try:
         logo = Image.open(logo_path).convert("RGBA")
         if es_efe:
             diametro = 460
-            c_x, c_y = ANCHO - diametro - 80, 40
-            draw.ellipse([c_x, c_y, c_x + diametro, c_y + diametro], fill=BLANCO)
+            draw.ellipse([ANCHO-diametro-80, 40, ANCHO-80, 40+diametro], fill=BLANCO)
             logo = ImageOps.contain(logo, (int(diametro*0.85), int(diametro*0.85)))
-            flyer.paste(logo, (c_x + (diametro - logo.width)//2, c_y + (diametro - logo.height)//2), logo)
+            flyer.paste(logo, (ANCHO-diametro-80 + (diametro-logo.width)//2, 40 + (diametro-logo.height)//2), logo)
         else:
-            c_ancho, c_alto = 500, 380
-            c_x = ANCHO - c_ancho - 80
-            draw.rectangle([c_x, 0, c_x + c_ancho, 40], fill=BLANCO)
-            draw.rounded_rectangle([c_x, 0, c_x + c_ancho, c_alto], radius=50, fill=BLANCO)
-            logo = ImageOps.contain(logo, (int(c_ancho*0.85), int(c_alto*0.80)))
-            flyer.paste(logo, (c_x + (c_ancho - logo.width)//2, (c_alto - logo.height)//2 + 10), logo)
+            c_w, c_h = 500, 380
+            draw.rectangle([ANCHO-c_w-80, 0, ANCHO-80, 40], fill=BLANCO)
+            draw.rounded_rectangle([ANCHO-c_w-80, 0, ANCHO-80, c_h], radius=50, fill=BLANCO)
+            logo = ImageOps.contain(logo, (int(c_w*0.85), int(c_h*0.80)))
+            flyer.paste(logo, (ANCHO-c_w-80 + (c_w-logo.width)//2, (c_h-logo.height)//2 + 10), logo)
     except: pass
 
-    # Tienda
     f_tienda = ImageFont.truetype(FONT_EXTRABOLD_COND, 90)
     txt_tienda = tienda_nombre.upper()
     tw_t = draw.textlength(txt_tienda, font=f_tienda)
     if es_efe:
-        draw.rounded_rectangle([ANCHO - tw_t - 150, 620, ANCHO, 800], radius=50, fill=EFE_NARANJA)
-        draw.rectangle([ANCHO - 60, 620, ANCHO, 800], fill=EFE_NARANJA)
-        draw.text((ANCHO - tw_t - 80, 655), txt_tienda, font=f_tienda, fill=BLANCO)
+        draw.rounded_rectangle([ANCHO-tw_t-150, 620, ANCHO, 800], radius=50, fill=EFE_NARANJA)
+        draw.rectangle([ANCHO-60, 620, ANCHO, 800], fill=EFE_NARANJA)
+        draw.text((ANCHO-tw_t-80, 655), txt_tienda, font=f_tienda, fill=BLANCO)
     else:
-        p_x = ANCHO - tw_t - 250
-        draw.polygon([(p_x, 720), (p_x + 100, 520), (ANCHO, 520), (ANCHO, 720)], fill=NEGRO)
-        draw.text((ANCHO - tw_t - 100, 570), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
+        draw.polygon([(ANCHO-tw_t-250, 720), (ANCHO-tw_t-150, 520), (ANCHO, 520), (ANCHO, 720)], fill=NEGRO)
+        draw.text((ANCHO-tw_t-100, 570), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
 
-    # Fecha
     f_fecha = ImageFont.truetype(FONT_BOLD_COND, 45)
     txt_gen = f"Generado: {fecha_peru}"
     tw_g = draw.textlength(txt_gen, font=f_fecha)
-    draw.rounded_rectangle([0, 850, tw_g + 80, 960], radius=40, fill=BLANCO)
+    draw.rounded_rectangle([0, 850, tw_g+80, 960], radius=40, fill=BLANCO)
     draw.rectangle([0, 850, 50, 960], fill=BLANCO)
     draw.text((40, 880), txt_gen, font=f_fecha, fill=NEGRO)
 
-    # Slogan
     f_slogan = ImageFont.truetype(FONT_EXTRABOLD, 105)
     slogan_txt = "¡APROVECHA ESTAS INCREÍBLES OFERTAS!"
     draw.rectangle([0, 1030, ANCHO, 1260], fill=color_slogan_bg)
     draw.text(((ANCHO-draw.textlength(slogan_txt, f_slogan))//2, 1085), slogan_txt, font=f_slogan, fill=BLANCO if es_efe else NEGRO)
 
-    # Productos
     anchos, altos = [110, 1300], [1350, 2150, 2950]
     f_marca = ImageFont.truetype(FONT_SEMIBOLD, 50)
     f_sku = ImageFont.truetype(FONT_BOLD_COND, 55)
-    f_stock_label = ImageFont.truetype(FONT_BOLD_COND, 45)
-    f_stock_val = ImageFont.truetype(FONT_EXTRABOLD, 110)
-
+    f_simbolo = ImageFont.truetype(FONT_BOLD_COND, 65)
+    
     for i, prod in enumerate(productos):
         if i >= 6: break
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
+        # --- TAG STOCK (Superior Izquierda) ---
+        stock_val = str(prod.get('Stock LM', '0'))
+        f_stock = ImageFont.truetype(FONT_BOLD_COND, 40)
+        tw_s = draw.textlength(f"STOCK: {stock_val}", f_stock)
+        box_color = EFE_AZUL if es_efe else LC_AMARILLO
+        txt_color = BLANCO if es_efe else NEGRO
+        draw.rounded_rectangle([x+30, y+30, x+30+tw_s+40, y+90], radius=15, fill=box_color)
+        draw.text((x+50, y+40), f"STOCK: {stock_val}", font=f_stock, fill=txt_color)
+
         img_p = descargar_imagen(prod.get('image_link'))
         if img_p:
-            img_p.thumbnail((520, 520))
-            flyer.paste(img_p, (x+30, y + (760-img_p.height)//2), img_p)
+            img_p.thumbnail((500, 500))
+            flyer.paste(img_p, (x+40, y + (760-img_p.height)//2 + 20), img_p)
 
         tx, area_w = x + 570, 480
         draw.text((tx, y+50), str(prod['Marca']).upper(), font=f_marca, fill=GRIS_MARCA)
@@ -147,82 +161,98 @@ def crear_flyer(productos, tienda_nombre):
             draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 60), fill=NEGRO)
             ty += 65
 
-        # --- BLOQUES FUSIONADOS (STOCK + SKU) ---
-        ty_stock = y + 420
-        h_stock = 180
-        # Stock: Redondeado arriba, recto abajo
-        draw.rounded_rectangle([tx, ty_stock, tx + area_w, ty_stock + h_stock], radius=25, fill=color_slogan_bg)
-        draw.rectangle([tx, ty_stock + h_stock - 30, tx + area_w, ty_stock + h_stock], fill=color_slogan_bg)
+        # --- BLOQUES FUSIONADOS (PRECIO + SKU) ---
+        ty_p = y + 420
+        h_p = 180
+        draw.rounded_rectangle([tx, ty_p, tx + area_w, ty_p + h_p], radius=25, fill=color_slogan_bg)
+        draw.rectangle([tx, ty_p + h_p - 30, tx + area_w, ty_p + h_p], fill=color_slogan_bg) 
         
-        # Textos Stock Centrados
-        txt_s = "STOCK"
-        draw.text((tx + (area_w - draw.textlength(txt_s, f_stock_label))//2, ty_stock + 15), txt_s, font=f_stock_label, fill=BLANCO if es_efe else NEGRO)
-        stock_n = formatear_stock(prod['Stock LM'])
-        draw.text((tx + (area_w - draw.textlength(stock_n, f_stock_val))//2, ty_stock + 60), stock_n, font=f_stock_val, fill=BLANCO if es_efe else NEGRO)
+        precio_val = formatear_precio(prod.get('Precio Vigente', '0.00'))
+        f_p_size = 120
+        f_p = ImageFont.truetype(FONT_EXTRABOLD, f_p_size)
+        while draw.textlength(f"S/ {precio_val}", f_p) > area_w - 40:
+            f_p_size -= 5
+            f_p = ImageFont.truetype(FONT_EXTRABOLD, f_p_size)
+            
+        full_p_w = draw.textlength("S/ ", f_simbolo) + draw.textlength(precio_val, f_p)
+        start_px = tx + (area_w - full_p_w)//2
+        draw.text((start_px, ty_p + 55), "S/ ", font=f_simbolo, fill=BLANCO if es_efe else NEGRO)
+        draw.text((start_px + draw.textlength("S/ ", f_simbolo), ty_p + 35), precio_val, font=f_p, fill=BLANCO if es_efe else NEGRO)
 
-        # SKU: Recto arriba, redondeado abajo
-        ty_sku = ty_stock + h_stock
-        h_sku = 85
+        ty_sku = ty_p + h_p
         sku_color = NEGRO if not es_efe else EFE_NARANJA
-        draw.rounded_rectangle([tx, ty_sku, tx + area_w, ty_sku + h_sku], radius=20, fill=sku_color)
-        draw.rectangle([tx, ty_sku, tx + area_w, ty_sku + 30], fill=sku_color)
-        
-        sku_val = str(prod['SKU'])
-        draw.text((tx + (area_w - draw.textlength(sku_val, f_sku))//2, ty_sku + 15), sku_val, font=f_sku, fill=BLANCO)
+        draw.rounded_rectangle([tx, ty_sku, tx + area_w, ty_sku + 85], radius=20, fill=sku_color)
+        draw.rectangle([tx, ty_sku, tx + area_w, ty_sku + 30], fill=sku_color) 
+        sku_txt = str(prod['SKU'])
+        draw.text((tx + (area_w - draw.textlength(sku_txt, f_sku))//2, ty_sku + 15), sku_txt, font=f_sku, fill=BLANCO)
 
     return flyer
 
-# --- FLUJO ---
+# --- FLUJO DE DATOS (TABLA MAESTRA) ---
 ss = conectar_sheets()
-print(f"Iniciando proceso para {semana_actual}...")
+print("Generando Tabla Maestra...")
 
-ws_origen = ss.worksheet("Origen Tdas")
-df_raw = pd.DataFrame(ws_origen.get_all_records())
+# 1. Origen Tdas
+df_raw = pd.DataFrame(ss.worksheet("Origen Tdas").get_all_records())
+df_origen = pd.DataFrame({
+    'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3],
+    'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7],
+    'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]
+})
+# Normalización para Match
+df_origen['TIENDA_KEY'] = df_origen['Tienda'].apply(normalizar_nombre_tienda)
 
-# Mapeo por posición
-df_origen = pd.DataFrame()
-df_origen['Semana'] = df_raw.iloc[:, 1]
-df_origen['Tienda'] = df_raw.iloc[:, 3]
-df_origen['Marca'] = df_raw.iloc[:, 6]
-df_origen['SKU'] = df_raw.iloc[:, 7]
-df_origen['Nombre Articulo'] = df_raw.iloc[:, 8]
-df_origen['Stock LM'] = df_raw.iloc[:, 11]
+# 2. TiendasxLista
+df_txl = pd.DataFrame(ss.worksheet("TiendasxLista").get_all_records())
+df_txl.columns = df_txl.columns.str.strip().str.upper()
+df_txl['TIENDA_KEY'] = df_txl['TIENDA'].apply(normalizar_nombre_tienda)
 
+# Merge 1: Obtener LISTA
+df_origen = df_origen.merge(df_txl[['TIENDA_KEY', 'LISTA']], on='TIENDA_KEY', how='left')
+
+# 3. Promos
+promos = []
+for p_sheet in ["Promo01", "Promo03", "Promo04"]:
+    temp = pd.DataFrame(ss.worksheet(p_sheet).get_all_records())
+    temp.columns = temp.columns.str.strip()
+    promos.append(temp[['Lista Precios', 'SKU', 'Precio Vigente']])
+df_promos = pd.concat(promos).drop_duplicates(subset=['Lista Precios', 'SKU'])
+df_promos['LISTA_STR'] = df_promos['Lista Precios'].astype(str).str.zfill(2)
+
+# Merge 2: Obtener Precio
+df_origen['LISTA_STR'] = df_origen['LISTA'].astype(str).str.zfill(2)
+df_master = df_origen.merge(df_promos, left_on=['LISTA_STR', 'SKU'], right_on=['LISTA_STR', 'SKU'], how='left')
+
+# 4. Imágenes y Limpieza
 df_lookup = pd.DataFrame(ss.worksheet("listado_productos").get_all_records())
+df_master['SKU_CLEAN'] = df_master['SKU'].astype(str).str.replace('-EX', '', case=False).str.strip()
+img_map = df_lookup.set_index('sku')['base_image_path'].to_dict()
+df_master['image_link'] = df_master['SKU_CLEAN'].map(img_map).fillna('')
 
-df_origen['Stock LM_NUM'] = pd.to_numeric(df_origen['Stock LM'], errors='coerce').fillna(0)
-df_filtered = df_origen[
-    (df_origen['Semana'].astype(str) == semana_actual) & 
-    (df_origen['Stock LM_NUM'] > 0)
+df_master['Stock LM_NUM'] = pd.to_numeric(df_master['Stock LM'], errors='coerce').fillna(0)
+df_final = df_master[
+    (df_master['Semana'].astype(str) == semana_actual) & (df_master['Stock LM_NUM'] > 0)
 ].copy()
 
-df_filtered['SKU_CLEAN'] = df_filtered['SKU'].astype(str).str.replace('-EX', '', case=False).str.strip()
-img_map = df_lookup.set_index('sku')['base_image_path'].to_dict()
-df_filtered['image_link'] = df_filtered['SKU_CLEAN'].map(img_map).fillna('')
-
+# Guardar Tabla Maestra
 ws_det = ss.worksheet("Detalle de Inventario")
 ws_det.clear()
-ws_det.update([df_filtered.columns.values.tolist()] + df_filtered.astype(str).values.tolist(), range_name='A1')
+col_order = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'SKU_CLEAN', 'image_link']
+ws_det.update([col_order] + df_final[col_order].astype(str).values.tolist(), range_name='A1')
 
+# --- GENERACIÓN DE PDFS ---
 tienda_links = []
 with ThreadPoolExecutor(max_workers=4) as exe:
-    grupos = df_filtered.groupby('Tienda')
+    grupos = df_final.groupby('Tienda')
     futuros = {exe.submit(crear_flyer, g.to_dict('records'), str(n)): n for n, g in grupos if str(n).strip()}
     for f in futuros:
         tienda = futuros[f]
         try:
-            img_res = f.result()
-            t_clean = "".join(c for c in tienda if c.isalnum() or c in " -_").strip().replace(" ", "_")
-            pdf_fn = f"LENTO_{t_clean}.pdf"
-            img_res.convert("RGB").save(os.path.join(output_dir, pdf_fn))
-            
-            pdf_encoded = urllib.parse.quote(pdf_fn)
-            url_final = f"{URL_BASE_PAGES}view.html?file={pdf_encoded}"
-            tienda_links.append([tienda, url_final])
+            pdf_name = f"LENTO_{tienda.replace(' ', '_')}.pdf"
+            f.result().convert("RGB").save(os.path.join(output_dir, pdf_name))
+            tienda_links.append([tienda, f"{URL_BASE_PAGES}view.html?file={urllib.parse.quote(pdf_name)}"])
         except Exception as e: print(f"Error en {tienda}: {e}")
 
-ws_flyer = ss.worksheet("FLYER_TIENDA")
-ws_flyer.clear()
-ws_flyer.update([["TIENDA RETAIL", "LINK PDF LENTO MOVIMIENTO"]] + tienda_links, range_name='A1')
-
-print("¡Proceso exitoso!")
+ss.worksheet("FLYER_TIENDA").clear()
+ss.worksheet("FLYER_TIENDA").update([["TIENDA RETAIL", "LINK PDF LENTO MOVIMIENTO"]] + tienda_links, range_name='A1')
+print("¡Proceso finalizado!")
