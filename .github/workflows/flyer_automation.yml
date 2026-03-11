@@ -46,6 +46,7 @@ jobs:
         with:
           folder: docs # Sube todo lo que esté en docs/ (incluyendo flyers/)
           branch: gh-pages # Los archivos vivirán aquí, lejos de tu código
+          token: ${{ secrets.GITHUB_TOKEN }} # Permiso automático de GitHub
           clean: true # Borra los de ayer antes de subir los de hoy
           single-commit: true # No guarda historial pesado, solo la versión de hoy
 
