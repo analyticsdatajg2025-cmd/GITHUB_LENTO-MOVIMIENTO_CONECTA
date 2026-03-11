@@ -161,19 +161,40 @@ def crear_flyer(productos, tienda_nombre, num_pag):
 
 def gestionar_archivo_drive(service, file_path, file_name):
     media = MediaFileUpload(file_path, mimetype='application/pdf')
+    
+    # 1. Buscar si el archivo ya existe
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
-    results = service.files().list(q=query, fields="files(id)").execute()
+    results = service.files().list(q=query, fields="files(id, owners)").execute()
     files = results.get('files', [])
 
     if files:
         file_id = files[0]['id']
+        # Actualizar contenido
         service.files().update(fileId=file_id, media_body=media).execute()
     else:
+        # 2. Crear archivo nuevo
         file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
         file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         file_id = file.get('id')
-    
-    # Link de descarga directa para el visualizador
+        
+        # 3. EL TRUCO SENIOR: Transferir la propiedad a tu cuenta personal para usar tus 2TB
+        # Tu correo según la imagen: analytics.data.jg.2025@gmail.com
+        try:
+            permission = {
+                'type': 'user',
+                'role': 'owner',
+                'emailAddress': 'analytics.data.jg.2025@gmail.com' # TU CORREO
+            }
+            # transferOwnership=True es la clave para que el bot no consuma su cuota
+            service.permissions().create(
+                fileId=file_id, 
+                body=permission, 
+                transferOwnership=True,
+                fields='id'
+            ).execute()
+        except Exception as e:
+            print(f"Nota: No se pudo transferir propiedad (normal en algunos dominios): {e}")
+
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 def procesar_tienda_batch(data, service_drive):
