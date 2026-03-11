@@ -9,19 +9,18 @@ import textwrap
 import urllib.parse
 import gc
 import hashlib
-import time
 from datetime import datetime, timedelta
 from oauth2client.service_account import ServiceAccountCredentials
 from concurrent.futures import ThreadPoolExecutor
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-# --- CONFIGURACIÓN BALANCEADA (Calidad vs Peso) ---
-ANCHO, ALTO = 1600, 2400
+# --- CONFIGURACIÓN VIP (Resolución Máxima) ---
+ANCHO, ALTO = 2500, 3750
 SHEET_ID = "1NQdhnPxgVe6N6LiVxh1ouzt5NHtqjR22EEqL6w1RpWQ"
-USUARIO_GITHUB = "analyticsdatajg2025-cmd" 
-REPO_NOMBRE = "GITHUB_LENTO-MOVIMIENTO_CONECTA"
-URL_BASE_PAGES = f"https://{USUARIO_GITHUB}.github.io/{REPO_NOMBRE}/"
+DRIVE_FOLDER_ID = "1UzcwDFTNDE3961roIbzDgOi88Xi_n66Y"
 
-output_dir = "docs/flyers"
+output_dir = "temp_flyers"
 cache_dir = "temp_cache_img"
 os.makedirs(output_dir, exist_ok=True)
 os.makedirs(cache_dir, exist_ok=True)
@@ -32,22 +31,23 @@ semana_actual = f"Sem{ahora_peru.isocalendar()[1]}"
 
 cache_memoria = {}
 
-# Fuentes
+# Fuentes y Colores
 FONT_BOLD_COND = "Mark Simonson - Proxima Nova Alt Condensed Bold.otf"
 FONT_EXTRABOLD_COND = "Mark Simonson - Proxima Nova Alt Condensed Extrabold.otf"
 FONT_REGULAR_COND = "Mark Simonson - Proxima Nova Alt Condensed Regular.otf"
 FONT_EXTRABOLD = "Mark Simonson - Proxima Nova Extrabold.otf"
 FONT_SEMIBOLD = "Mark Simonson - Proxima Nova Semibold.otf"
 
-# Colores
 LC_AMARILLO, LC_AMARILLO_OSCURO = (255, 203, 5), (235, 180, 0)
 EFE_AZUL, EFE_AZUL_OSCURO = (0, 107, 213), (0, 60, 150)
 EFE_NARANJA, BLANCO, NEGRO, GRIS_MARCA = (255, 100, 0), (255, 255, 255), (0, 0, 0), (100, 100, 100)
 
-def conectar_sheets():
+def conectar_servicios():
     info_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(info_creds, ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"])
-    return gspread.authorize(creds).open_by_key(SHEET_ID)
+    client_sheets = gspread.authorize(creds).open_by_key(SHEET_ID)
+    service_drive = build('drive', 'v3', credentials=creds)
+    return client_sheets, service_drive
 
 def normalizar_nombre_tienda(nombre):
     s = str(nombre).upper().replace(" ", "").replace("-", "")
@@ -62,9 +62,9 @@ def descargar_y_cachear(url):
         cache_memoria[url] = fname
         return
     try:
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         img = Image.open(BytesIO(res.content)).convert("RGBA")
-        img.thumbnail((400, 400)) 
+        img.thumbnail((650, 650))
         img.save(fname, "PNG")
         cache_memoria[url] = fname
     except: cache_memoria[url] = None
@@ -77,98 +77,106 @@ def crear_flyer(productos, tienda_nombre, num_pag):
     flyer = Image.new('RGB', (ANCHO, ALTO), color=color_fondo)
     draw = ImageDraw.Draw(flyer)
     
-    # --- HEADER DESIGN ---
     try:
         bg_p = "efe tienda.jpg" if es_efe else "LC-MIRAFLORES-LOGO-3D[2].jpg"
         with Image.open(bg_p) as b:
-            flyer.paste(ImageOps.fit(b.convert("RGBA"), (ANCHO, 650)), (0, 0))
+            flyer.paste(ImageOps.fit(b.convert("RGBA"), (ANCHO, 1000)), (0, 0))
         
         logo_p = "logo-efe-sin-fondo.png" if es_efe else "logo-lc-sin-fondo.png"
         with Image.open(logo_p).convert("RGBA") as l:
             if es_efe:
-                draw.ellipse([ANCHO-380, 40, ANCHO-60, 360], fill=BLANCO)
-                logo = ImageOps.contain(l, (260, 260))
-                flyer.paste(logo, (ANCHO-380+(320-logo.width)//2, 40+(320-logo.height)//2), logo)
+                draw.ellipse([ANCHO-540, 40, ANCHO-80, 500], fill=BLANCO)
+                logo = ImageOps.contain(l, (390, 390))
+                flyer.paste(logo, (ANCHO-540+(460-logo.width)//2, 40+(460-logo.height)//2), logo)
             else:
-                draw.rounded_rectangle([ANCHO-420, 20, ANCHO-40, 300], radius=40, fill=BLANCO)
-                logo = ImageOps.contain(l, (320, 220))
-                flyer.paste(logo, (ANCHO-420+(380-logo.width)//2, 40), logo)
+                draw.rounded_rectangle([ANCHO-580, 0, ANCHO-80, 380], radius=50, fill=BLANCO)
+                logo = ImageOps.contain(l, (425, 300))
+                flyer.paste(logo, (ANCHO-580+(500-logo.width)//2, 50), logo)
     except: pass
 
-    # --- NOMBRE TIENDA (RECUPERADO) ---
-    f_tienda = ImageFont.truetype(FONT_EXTRABOLD_COND, 70)
+    # Nombre Tienda con Diseño Recuperado
+    f_tienda = ImageFont.truetype(FONT_EXTRABOLD_COND, 90)
     txt_tienda = tienda_nombre.upper()
     tw_t = draw.textlength(txt_tienda, font=f_tienda)
-    
     if es_efe:
-        draw.rounded_rectangle([ANCHO - tw_t - 120, 420, ANCHO, 550], radius=30, fill=EFE_NARANJA)
-        draw.text((ANCHO - tw_t - 60, 440), txt_tienda, font=f_tienda, fill=BLANCO)
+        draw.rounded_rectangle([ANCHO - tw_t - 150, 620, ANCHO, 800], radius=50, fill=EFE_NARANJA)
+        draw.text((ANCHO - tw_t - 80, 655), txt_tienda, font=f_tienda, fill=BLANCO)
     else:
-        p_x = ANCHO - tw_t - 200
-        draw.polygon([(p_x, 520), (p_x + 80, 400), (ANCHO, 400), (ANCHO, 520)], fill=NEGRO)
-        draw.text((ANCHO - tw_t - 80, 420), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
+        p_x = ANCHO - tw_t - 250
+        draw.polygon([(p_x, 720), (p_x + 100, 520), (ANCHO, 520), (ANCHO, 720)], fill=NEGRO)
+        draw.text((ANCHO - tw_t - 100, 570), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
 
-    # --- FECHA GENERACIÓN ---
-    f_fecha = ImageFont.truetype(FONT_BOLD_COND, 35)
+    # Fecha y Paginación
+    f_fecha = ImageFont.truetype(FONT_BOLD_COND, 45)
     txt_gen = f"Generado: {fecha_peru} - PÁG {num_pag}"
-    draw.rounded_rectangle([20, 570, 650, 630], radius=20, fill=BLANCO)
-    draw.text((40, 582), txt_gen, font=f_fecha, fill=NEGRO)
+    draw.rounded_rectangle([0, 850, 850, 960], radius=40, fill=BLANCO)
+    draw.text((40, 880), txt_gen, font=f_fecha, fill=NEGRO)
 
-    # --- SLOGAN ---
-    draw.rectangle([0, 650, ANCHO, 800], fill=color_slogan_bg)
-    draw.text((ANCHO//2, 725), "¡APROVECHA ESTAS INCREÍBLES OFERTAS!", font=ImageFont.truetype(FONT_EXTRABOLD, 68), fill=BLANCO if es_efe else NEGRO, anchor="mm")
+    # Slogan
+    draw.rectangle([0, 1030, ANCHO, 1260], fill=color_slogan_bg)
+    draw.text((ANCHO//2, 1145), "¡APROVECHA ESTAS INCREÍBLES OFERTAS!", font=ImageFont.truetype(FONT_EXTRABOLD, 105), fill=BLANCO if es_efe else NEGRO, anchor="mm")
 
-    # --- GRILLA DE PRODUCTOS ---
-    anchos, altos = [60, 840], [840, 1340, 1840]
+    # Grilla de Productos
+    anchos, altos = [110, 1300], [1350, 2150, 2950]
     for i, prod in enumerate(productos):
         x, y = anchos[i%2], altos[i//2]
-        draw.rounded_rectangle([x, y, x+700, y+470], radius=50, fill=BLANCO)
+        draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
-        # STOCK (Lógica punto decimal + Sin Stock)
         stock_raw = str(prod.get('Stock LM', '0')).replace(".", "").strip()
         if stock_raw in ["0", "", "nan"]: stock_txt, color_st = "SIN STOCK", GRIS_MARCA
         else: stock_txt, color_st = f"STOCK: {stock_raw}", (EFE_AZUL if es_efe else LC_AMARILLO)
         
-        draw.rounded_rectangle([x+20, y+20, x+250, y+80], radius=15, fill=color_st)
-        draw.text((x+135, y+50), stock_txt, font=ImageFont.truetype(FONT_BOLD_COND, 24), fill=BLANCO if es_efe else NEGRO, anchor="mm")
+        draw.rounded_rectangle([x+30, y+30, x+340, y+140], radius=15, fill=color_st)
+        draw.text((x+185, y+85), stock_txt, font=ImageFont.truetype(FONT_BOLD_COND, 40), fill=BLANCO if es_efe else NEGRO, anchor="mm")
 
-        # Imagen Producto (Ajustada para no chocar)
         path_img = cache_memoria.get(prod.get('image_link'))
         if path_img:
             with Image.open(path_img) as img:
-                flyer.paste(img, (x+20, y+100), img)
+                flyer.paste(img, (x+40, y+150), img)
 
-        tx, area_w = x + 340, 330
-        draw.text((tx, y+30), str(prod.get('Marca', '')).upper(), font=ImageFont.truetype(FONT_SEMIBOLD, 30), fill=GRIS_MARCA)
-        
-        # Nombre Artículo
-        lines = textwrap.wrap(str(prod.get('Nombre Articulo', '')), width=18)
-        ty = y + 75
+        tx, area_w = x + 600, 450
+        draw.text((tx, y+80), str(prod.get('Marca', '')).upper(), font=ImageFont.truetype(FONT_SEMIBOLD, 55), fill=GRIS_MARCA)
+        lines = textwrap.wrap(str(prod.get('Nombre Articulo', '')), width=16)
+        ty = y + 160
         for line in lines[:3]:
-            draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 34), fill=NEGRO)
-            ty += 38
+            draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 65), fill=NEGRO)
+            ty += 75
 
-        # --- BLOQUE UNIFICADO PRECIO + SKU ---
-        ty_p = y + 250
-        # Botón Precio (Arriba)
-        draw.rounded_rectangle([tx, ty_p, tx + area_w, ty_p + 100], radius=15, fill=color_slogan_bg)
+        # Bloque Precio + SKU Unificado
+        ty_p = y + 420
         p_raw = str(prod.get('Precio Vigente', '0')).replace(".00", "").replace(",00", "").strip()
+        draw.rounded_rectangle([tx, ty_p, tx + area_w, ty_p + 180], radius=25, fill=color_slogan_bg)
         
         if p_raw in ["0.0", "0", "", "nan", "SIN PRECIO"]:
-            draw.text((tx + area_w//2, ty_p + 50), "SIN PRECIO", font=ImageFont.truetype(FONT_EXTRABOLD, 40), fill=BLANCO if es_efe else NEGRO, anchor="mm")
+            draw.text((tx + area_w//2, ty_p + 90), "SIN PRECIO", font=ImageFont.truetype(FONT_EXTRABOLD, 80), fill=BLANCO if es_efe else NEGRO, anchor="mm")
         else:
-            draw.text((tx + area_w//2, ty_p + 50), f"S/ {p_raw}", font=ImageFont.truetype(FONT_EXTRABOLD, 60), fill=BLANCO if es_efe else NEGRO, anchor="mm")
+            draw.text((tx + area_w//2, ty_p + 90), f"S/ {p_raw}", font=ImageFont.truetype(FONT_EXTRABOLD, 110), fill=BLANCO if es_efe else NEGRO, anchor="mm")
 
-        # Botón SKU (Abajo - Recto arriba para unir)
-        sku_color = NEGRO if not es_efe else EFE_NARANJA
-        draw.rounded_rectangle([tx, ty_p+100, tx+area_w, ty_p+160], radius=15, fill=sku_color)
-        # Rectángulo tapando redondeo superior del SKU para unirlo al precio
-        draw.rectangle([tx, ty_p+100, tx+area_w, ty_p+110], fill=sku_color) 
-        draw.text((tx+area_w//2, ty_p+130), f"SKU: {prod['SKU']}", font=ImageFont.truetype(FONT_BOLD_COND, 30), fill=BLANCO, anchor="mm")
+        sku_c = NEGRO if not es_efe else EFE_NARANJA
+        draw.rounded_rectangle([tx, ty_p+180, tx+area_w, ty_p+280], radius=25, fill=sku_c)
+        draw.rectangle([tx, ty_p+180, tx+area_w, ty_p+200], fill=sku_c) # Unificador
+        draw.text((tx+area_w//2, ty_p+230), f"SKU: {prod['SKU']}", font=ImageFont.truetype(FONT_BOLD_COND, 55), fill=BLANCO, anchor="mm")
 
     return flyer
 
-def procesar_tienda_batch(data):
+def gestionar_archivo_drive(service, file_path, file_name):
+    media = MediaFileUpload(file_path, mimetype='application/pdf')
+    query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
+    results = service.files().list(q=query, fields="files(id)").execute()
+    files = results.get('files', [])
+
+    if files:
+        file_id = files[0]['id']
+        service.files().update(fileId=file_id, media_body=media).execute()
+    else:
+        file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
+        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        file_id = file.get('id')
+    
+    # Link de descarga directa para el visualizador
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+
+def procesar_tienda_batch(data, service_drive):
     nombre, grupo = data
     try:
         prods = grupo.to_dict('records')
@@ -178,42 +186,46 @@ def procesar_tienda_batch(data):
         
         if paginas:
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
-            if not clean: clean = "TIENDA"
             fn = f"LENTO_{clean}.pdf"
-            # Calidad 50: Texto nítido, imagen comprimida
-            paginas[0].save(os.path.join(output_dir, fn), save_all=True, append_images=paginas[1:], quality=50, optimize=True)
+            local_path = os.path.join(output_dir, fn)
+            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=85, optimize=True)
             for p in paginas: p.close()
-            return [nombre, f"{URL_BASE_PAGES}view.html?file={urllib.parse.quote(fn)}"]
+            
+            # SUBIDA A DRIVE
+            link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
+            return [nombre, link_drive]
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error en {nombre}: {e}")
     return None
 
-# --- FLUJO PRINCIPAL ---
-ss = conectar_sheets()
-df_raw = pd.DataFrame(ss.worksheet("Origen Tdas").get_all_records())
+# --- FLUJO ---
+ss_client, drive_service = conectar_servicios()
+
+# Carga de datos
+df_raw = pd.DataFrame(ss_client.worksheet("Origen Tdas").get_all_records())
 df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3], 'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7], 'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]})
 
-df_lookup = pd.DataFrame(ss.worksheet("listado_productos").get_all_records())
+df_lookup = pd.DataFrame(ss_client.worksheet("listado_productos").get_all_records())
 img_dict = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', case=False).map(img_dict).fillna('')
 
 promos = {}
 for p in ["Promo01", "Promo03", "Promo04"]:
-    df_p = pd.DataFrame(ss.worksheet(p).get_all_records())
+    df_p = pd.DataFrame(ss_client.worksheet(p).get_all_records())
     df_p.columns = df_p.columns.str.strip()
     df_p['K'] = df_p['Lista Precios'].astype(str).str.replace(".0","") + "_" + df_p['SKU'].astype(str)
     promos.update(df_p.set_index('K')['Precio Vigente'].to_dict())
 
-df_txl = pd.DataFrame(ss.worksheet("TiendasxLista").get_all_records())
+df_txl = pd.DataFrame(ss_client.worksheet("TiendasxLista").get_all_records())
 txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
 
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 
-# Guardar Detalle
+# Guardar Detalle de Inventario
 try:
-    ws_det = ss.worksheet("Detalle de Inventario")
+    ws_det = ss_client.worksheet("Detalle de Inventario")
     ws_det.clear()
     cols = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
     ws_det.update([cols] + df_final[cols].astype(str).values.tolist(), range_name='A1')
@@ -222,13 +234,15 @@ except: pass
 with ThreadPoolExecutor(max_workers=30) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
+print(">> Generando y subiendo a Drive...")
 tienda_links = []
-with ThreadPoolExecutor(max_workers=4) as exe:
-    resultados = list(exe.map(procesar_tienda_batch, df_final.groupby('Tienda')))
-    tienda_links = [r for r in resultados if r]
+# Procesamos uno por uno o pocos hilos para no saturar el API de Drive
+for data in df_final.groupby('Tienda'):
+    res = procesar_tienda_batch(data, drive_service)
+    if res: tienda_links.append(res)
 
-ss.worksheet("FLYER_TIENDA").clear()
+ss_client.worksheet("FLYER_TIENDA").clear()
 if tienda_links:
-    ss.worksheet("FLYER_TIENDA").update([["TIENDA", "LINK"]] + tienda_links, range_name='A1')
+    ss_client.worksheet("FLYER_TIENDA").update([["TIENDA", "LINK DRIVE"]] + tienda_links, range_name='A1')
 
-print(">> PROCESO COMPLETADO.")
+print(">> PROCESO COMPLETADO EXITOSAMENTE.")

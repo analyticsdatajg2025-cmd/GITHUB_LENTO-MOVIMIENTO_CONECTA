@@ -7,66 +7,23 @@ on:
   push:
     branches: [ main ]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Añadimos el entorno explícitamente para evitar el error 400
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1 
 
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip' 
+          cache: 'pip'
 
       - name: Instalar librerias
-        run: pip install -r requirements.txt 
-
-      - name: Limpiar y Preparar Directorios
-        run: |
-          mkdir -p docs/flyers
-          mkdir -p temp_cache_img
-          # Limpieza local para que el artefacto sea ligero
-          rm -f docs/flyers/*.pdf 
+        run: pip install -r requirements.txt
 
       - name: Ejecutar Script de Flyers
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
         run: python generar_flyers.py
-
-      - name: Configurar Git para archivos grandes
-        run: |
-          git config --global http.postBuffer 524288000
-          git config --global core.compression 0
-
-      - name: Deploy a la rama gh-pages
-        uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          folder: docs
-          branch: gh-pages
-          token: ${{ secrets.GITHUB_TOKEN }}
-          clean: true
-          single-commit: true
-
-      - name: Subir Artifact para Pages
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'docs/'
-
-      - name: Desplegar a GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
