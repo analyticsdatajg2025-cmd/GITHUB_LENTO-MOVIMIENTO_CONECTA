@@ -160,7 +160,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
     return flyer
 
 def gestionar_archivo_drive(service, file_path, file_name):
-    media = MediaFileUpload(file_path, mimetype='application/pdf')
+    media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
     
     # 1. Buscar si el archivo ya existe
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
@@ -169,23 +169,27 @@ def gestionar_archivo_drive(service, file_path, file_name):
 
     if files:
         file_id = files[0]['id']
-        # Actualizar contenido
+        # Si existe, actualizamos el contenido (aquí no hay problema de cuota porque el dueño ya eres tú)
         service.files().update(fileId=file_id, media_body=media).execute()
     else:
-        # 2. Crear archivo nuevo
-        file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
+        # 2. Si no existe, lo creamos
+        file_metadata = {
+            'name': file_name,
+            'parents': [DRIVE_FOLDER_ID]
+        }
+        
+        # Creamos el archivo
         file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         file_id = file.get('id')
         
-        # 3. EL TRUCO SENIOR: Transferir la propiedad a tu cuenta personal para usar tus 2TB
-        # Tu correo según la imagen: analytics.data.jg.2025@gmail.com
+        # 3. EL TRUCO SENIOR: Transferir la propiedad a tu cuenta de 2TB inmediatamente
         try:
             permission = {
                 'type': 'user',
                 'role': 'owner',
-                'emailAddress': 'analytics.data.jg.2025@gmail.com' # TU CORREO
+                'emailAddress': 'analytics.data.jg.2025@gmail.com' # TU CORREO DE DUEÑO
             }
-            # transferOwnership=True es la clave para que el bot no consuma su cuota
+            # transferOwnership=True hace que el peso pase a tu cuenta y el Bot quede libre
             service.permissions().create(
                 fileId=file_id, 
                 body=permission, 
@@ -193,7 +197,7 @@ def gestionar_archivo_drive(service, file_path, file_name):
                 fields='id'
             ).execute()
         except Exception as e:
-            print(f"Nota: No se pudo transferir propiedad (normal en algunos dominios): {e}")
+            print(f"Aviso en transferencia de {file_name}: {e}")
 
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
