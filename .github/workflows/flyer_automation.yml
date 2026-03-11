@@ -18,44 +18,48 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1 # Clonado rápido sin historial pesado
+          fetch-depth: 1 
 
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip' # Acelera la instalación de librerías
+          cache: 'pip' 
 
       - name: Instalar librerias
-        run: pip install -r requirements.txt # Cambiamos la lista manual por el archivo
+        run: pip install -r requirements.txt 
 
       - name: Limpiar y Preparar Directorios
         run: |
           mkdir -p docs/flyers
           mkdir -p temp_cache_img
-          # Opcional: rm -rf docs/flyers/*.pdf (Si quieres frescura total diaria)
+          # Limpieza profunda de los archivos de ayer para que Git no sufra comparando
+          rm -f docs/flyers/*.pdf 
 
       - name: Ejecutar Script de Flyers
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
         run: python generar_flyers.py
 
-      - name: Commit y Push de cambios
+      - name: Commit y Push (Estrategia de Estabilidad Senior)
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # SOLUCIÓN SENIOR: Aumentar buffer para evitar desconexiones RPC/500
+          # Aumentar buffer al máximo permitido para evitar desconexiones RPC
           git config http.postBuffer 524288000
+          git config core.compression 0
           
+          # Añadir archivos
           git add docs/flyers/*.pdf
-          # Solo hacemos commit si hay archivos nuevos o cambios
+          
           if git diff --staged --quiet; then
-            echo "Sin cambios en los PDFs."
+            echo "Sin cambios detectados."
           else
             git commit -m "Update Flyers: $(date +'%Y-%m-%d %H:%M') [skip ci]"
-            # Intentar push con reintentos en caso de saturación de red
-            git push origin main || (sleep 10 && git push origin main)
+            
+            # Reintentos con estrategia de retroceso si GitHub está saturado
+            git push origin main || (sleep 30 && git push origin main)
           fi
 
       - name: Subir a GitHub Pages
