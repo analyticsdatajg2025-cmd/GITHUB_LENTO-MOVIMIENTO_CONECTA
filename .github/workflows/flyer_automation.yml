@@ -7,6 +7,10 @@ on:
   push:
     branches: [ main ]
 
+env:
+  # Soluciona advertencias de Node.js y mejora rendimiento de las Actions
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,7 +37,7 @@ jobs:
         run: |
           mkdir -p docs/flyers
           mkdir -p temp_cache_img
-          # Limpieza profunda de los archivos de ayer para que Git no sufra comparando
+          # Limpiamos localmente para que el script genere archivos frescos
           rm -f docs/flyers/*.pdf 
 
       - name: Ejecutar Script de Flyers
@@ -41,19 +45,28 @@ jobs:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
         run: python generar_flyers.py
 
+      - name: Configurar Git para archivos grandes
+        run: |
+          git config --global http.postBuffer 524288000
+          git config --global core.compression 0
+
       - name: Deploy a GitHub Pages (Estrategia Anti-Error 500)
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: docs # Sube todo lo que esté en docs/ (incluyendo flyers/)
-          branch: gh-pages # Los archivos vivirán aquí, lejos de tu código
-          token: ${{ secrets.GITHUB_TOKEN }} # Permiso automático de GitHub
-          clean: true # Borra los de ayer antes de subir los de hoy
-          single-commit: true # No guarda historial pesado, solo la versión de hoy
+          folder: docs
+          branch: gh-pages
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Mantenemos clean en false para evitar que rsync sature el servidor borrando todo
+          clean: false 
+          # No forzamos single-commit para evitar que el re-empaquetado de git falle en el server
+          single-commit: false 
+          git-config-name: github-actions[bot]
+          git-config-email: github-actions[bot]@users.noreply.github.com
 
-      - name: Subir a GitHub Pages
+      - name: Subir Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: 'docs/'
 
-      - name: Desplegar
+      - name: Desplegar a Pages
         uses: actions/deploy-pages@v4
