@@ -41,28 +41,13 @@ jobs:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
         run: python generar_flyers.py
 
-      - name: Commit y Push (Estrategia de Estabilidad Senior)
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Aumentar buffer y desactivar compresión (los PDFs ya están comprimidos)
-          git config http.postBuffer 524288000
-          git config core.compression 0
-          
-          # LIMPIEZA DEL ÍNDICE: Obligamos a Git a olvidar el peso de ayer
-          git rm -r --cached docs/flyers/*.pdf || echo "Nada que limpiar"
-          git add docs/flyers/*.pdf
-          
-          if git diff --staged --quiet; then
-            echo "Sin cambios detectados."
-          else
-            # Usamos --amend o simplemente un commit limpio para no inflar el repo
-            git commit -m "Update Flyers: $(date +'%Y-%m-%d %H:%M') [skip ci]"
-            
-            # PUSH CON REINTENTOS AGRESIVOS
-            git push origin main --force || (sleep 30 && git push origin main --force)
-          fi
+      - name: Deploy a GitHub Pages (Estrategia Anti-Error 500)
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: docs # Sube todo lo que esté en docs/ (incluyendo flyers/)
+          branch: gh-pages # Los archivos vivirán aquí, lejos de tu código
+          clean: true # Borra los de ayer antes de subir los de hoy
+          single-commit: true # No guarda historial pesado, solo la versión de hoy
 
       - name: Subir a GitHub Pages
         uses: actions/upload-pages-artifact@v3
