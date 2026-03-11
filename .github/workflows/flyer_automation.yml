@@ -46,20 +46,22 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Aumentar buffer al máximo permitido para evitar desconexiones RPC
+          # Aumentar buffer y desactivar compresión (los PDFs ya están comprimidos)
           git config http.postBuffer 524288000
           git config core.compression 0
           
-          # Añadir archivos
+          # LIMPIEZA DEL ÍNDICE: Obligamos a Git a olvidar el peso de ayer
+          git rm -r --cached docs/flyers/*.pdf || echo "Nada que limpiar"
           git add docs/flyers/*.pdf
           
           if git diff --staged --quiet; then
             echo "Sin cambios detectados."
           else
+            # Usamos --amend o simplemente un commit limpio para no inflar el repo
             git commit -m "Update Flyers: $(date +'%Y-%m-%d %H:%M') [skip ci]"
             
-            # Reintentos con estrategia de retroceso si GitHub está saturado
-            git push origin main || (sleep 30 && git push origin main)
+            # PUSH CON REINTENTOS AGRESIVOS
+            git push origin main --force || (sleep 30 && git push origin main --force)
           fi
 
       - name: Subir a GitHub Pages

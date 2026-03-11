@@ -103,6 +103,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+675, y+450], radius=40, fill=BLANCO)
         
+        # STOCK LITERAL (Ej: 6.180)
         stock_val = str(prod.get('Stock LM', '0'))
         draw.rounded_rectangle([x+15, y+15, x+220, y+85], radius=10, fill=EFE_AZUL if es_efe else LC_AMARILLO)
         draw.text((x+117, y+32), "STOCK", font=ImageFont.truetype(FONT_BOLD_COND, 22), fill=BLANCO if es_efe else NEGRO, anchor="mm")
@@ -121,6 +122,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 36), fill=NEGRO)
             ty += 40
 
+        # PRECIO (Fix .00 y 0.0)
         ty_p = y + 250
         draw.rounded_rectangle([tx, ty_p, tx + area_w, ty_p + 110], radius=15, fill=color_slogan_bg)
         p_raw = str(prod.get('Precio Vigente', '0')).replace(".00", "").strip()
@@ -144,12 +146,9 @@ def procesar_tienda_batch(data):
             paginas.append(crear_flyer(prods[i:i+6], str(nombre), (i//6)+1).convert("RGB"))
         
         if paginas:
-            # Limpieza estricta de nombre de archivo
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
             if not clean: clean = "TIENDA_SIN_NOMBRE"
             fn = f"LENTO_{clean}.pdf"
-            
-            # Calidad 35: Ideal para balancear peso y legibilidad
             paginas[0].save(os.path.join(output_dir, fn), save_all=True, append_images=paginas[1:], quality=35, optimize=True)
             for p in paginas: p.close()
             return [nombre, f"{URL_BASE_PAGES}view.html?file={urllib.parse.quote(fn)}"]
@@ -158,15 +157,26 @@ def procesar_tienda_batch(data):
     return None
 
 # --- FLUJO ---
-print(">> Conectando y cargando datos...")
+print(">> [SISTEMA] Conectando y cargando datos...")
 ss = conectar_sheets()
-df_raw = pd.DataFrame(ss.worksheet("Origen Tdas").get_all_records())
-df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3], 'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7], 'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]})
 
+# 1. Carga de Origen
+df_raw = pd.DataFrame(ss.worksheet("Origen Tdas").get_all_records())
+df_origen = pd.DataFrame({
+    'Semana': df_raw.iloc[:, 1], 
+    'Tienda': df_raw.iloc[:, 3], 
+    'Marca': df_raw.iloc[:, 6], 
+    'SKU': df_raw.iloc[:, 7], 
+    'Nombre Articulo': df_raw.iloc[:, 8], 
+    'Stock LM': df_raw.iloc[:, 11]
+})
+
+# 2. Carga de Imágenes
 df_lookup = pd.DataFrame(ss.worksheet("listado_productos").get_all_records())
 img_dict = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', case=False).map(img_dict).fillna('')
 
+# 3. Carga de Precios
 promos = {}
 for p in ["Promo01", "Promo03", "Promo04"]:
     df_p = pd.DataFrame(ss.worksheet(p).get_all_records())
@@ -174,24 +184,42 @@ for p in ["Promo01", "Promo03", "Promo04"]:
     df_p['K'] = df_p['Lista Precios'].astype(str).str.replace(".0","") + "_" + df_p['SKU'].astype(str)
     promos.update(df_p.set_index('K')['Precio Vigente'].to_dict())
 
+# 4. Carga de Tiendas x Lista
 df_txl = pd.DataFrame(ss.worksheet("TiendasxLista").get_all_records())
-txl = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
-df_origen['L'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl).fillna("")
-df_origen['Precio Vigente'] = (df_origen['L'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
+txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
+df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 
+# 5. Cruce Final de Precios
+df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
+
+# 6. Filtrado de Semana Actual
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 
-print(">> Pre-descarga de imágenes...")
+# --- PASO CRÍTICO: GUARDAR DETALLE DE INVENTARIO ANTES DE RENDERIZAR ---
+print(">> [SISTEMA] Actualizando hoja Detalle de Inventario...")
+try:
+    ws_det = ss.worksheet("Detalle de Inventario")
+    ws_det.clear()
+    # Asegurar orden de columnas solicitado por el usuario
+    cols_detalle = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
+    df_detalle = df_final[cols_detalle].astype(str)
+    ws_det.update([df_detalle.columns.tolist()] + df_detalle.values.tolist(), range_name='A1')
+    print(">> [OK] Detalle de Inventario actualizado.")
+except Exception as e:
+    print(f">> [ERROR] Falló actualización de Detalle: {e}")
+
+# --- PASO 7: RENDERIZADO ---
+print(">> [SISTEMA] Pre-descarga de imágenes...")
 with ThreadPoolExecutor(max_workers=30) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
-print(f">> Renderizando {len(df_final.groupby('Tienda'))} tiendas...")
+print(f">> [SISTEMA] Renderizando {len(df_final.groupby('Tienda'))} tiendas...")
 tienda_links = []
 with ThreadPoolExecutor(max_workers=4) as exe:
     resultados = list(exe.map(procesar_tienda_batch, df_final.groupby('Tienda')))
     tienda_links = [r for r in resultados if r]
 
-# Limpieza y actualización de hoja final
+# Actualizar hoja final de links
 ss.worksheet("FLYER_TIENDA").clear()
 if tienda_links:
     ss.worksheet("FLYER_TIENDA").update([["TIENDA", "LINK"]] + tienda_links, range_name='A1')
