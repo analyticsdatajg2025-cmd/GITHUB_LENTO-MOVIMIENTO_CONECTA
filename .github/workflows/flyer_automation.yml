@@ -8,12 +8,15 @@ on:
     branches: [ main ]
 
 env:
-  # Soluciona advertencias de Node.js y mejora rendimiento de las Actions
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Añadimos el entorno explícitamente para evitar el error 400
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     permissions:
       contents: write
       pages: write
@@ -37,7 +40,7 @@ jobs:
         run: |
           mkdir -p docs/flyers
           mkdir -p temp_cache_img
-          # Limpiamos localmente para que el script genere archivos frescos
+          # Limpieza local para que el artefacto sea ligero
           rm -f docs/flyers/*.pdf 
 
       - name: Ejecutar Script de Flyers
@@ -50,23 +53,20 @@ jobs:
           git config --global http.postBuffer 524288000
           git config --global core.compression 0
 
-      - name: Deploy a GitHub Pages (Estrategia Anti-Error 500)
+      - name: Deploy a la rama gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           folder: docs
           branch: gh-pages
           token: ${{ secrets.GITHUB_TOKEN }}
-          # Mantenemos clean en false para evitar que rsync sature el servidor borrando todo
-          clean: false 
-          # No forzamos single-commit para evitar que el re-empaquetado de git falle en el server
-          single-commit: false 
-          git-config-name: github-actions[bot]
-          git-config-email: github-actions[bot]@users.noreply.github.com
+          clean: true
+          single-commit: true
 
-      - name: Subir Artifact
+      - name: Subir Artifact para Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: 'docs/'
 
-      - name: Desplegar a Pages
+      - name: Desplegar a GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
