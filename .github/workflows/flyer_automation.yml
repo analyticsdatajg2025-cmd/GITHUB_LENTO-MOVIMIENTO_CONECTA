@@ -22,9 +22,10 @@ jobs:
 
       - name: Instalar librerias
         run: |
-          pip install pandas requests Pillow gspread oauth2client google-api-python-client
+          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
 
       - name: Ejecutar Script de Flyers
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
+          GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
         run: python generar_flyers.py
