@@ -162,26 +162,29 @@ def crear_flyer(productos, tienda_nombre, num_pag):
 def gestionar_archivo_drive(service, file_path, file_name):
     media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
     
-    # Buscamos si existe con soporte para todas las unidades
+    # Buscamos si existe con los parámetros correctos de la API v3
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
+    
+    # LLAMADA LIMPIA: Sin parámetros conflictivos
     results = service.files().list(
         q=query, 
         fields="files(id)",
         supportsAllDrives=True,
-        includeItemsFromTrash=False
+        includeTeamDriveItems=True
     ).execute()
+    
     files = results.get('files', [])
 
     if files:
         file_id = files[0]['id']
-        # Actualizar: Al actualizar un archivo que ya está en tu carpeta, usa TU cuota
+        # Actualizar archivo existente
         service.files().update(
             fileId=file_id, 
             media_body=media,
             supportsAllDrives=True
         ).execute()
     else:
-        # Crear: Forzamos que se cree directamente bajo tu jerarquía
+        # Crear archivo nuevo
         file_metadata = {
             'name': file_name,
             'parents': [DRIVE_FOLDER_ID]
@@ -191,7 +194,7 @@ def gestionar_archivo_drive(service, file_path, file_name):
             body=file_metadata, 
             media_body=media, 
             fields='id',
-            supportsAllDrives=True # CLAVE: Ignora la cuota del bot y usa la de la carpeta
+            supportsAllDrives=True
         ).execute()
         file_id = file.get('id')
         
