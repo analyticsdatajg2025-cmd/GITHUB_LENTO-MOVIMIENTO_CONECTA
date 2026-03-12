@@ -162,43 +162,39 @@ def crear_flyer(productos, tienda_nombre, num_pag):
 def gestionar_archivo_drive(service, file_path, file_name):
     media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
     
-    # 1. Buscar si el archivo ya existe
+    # Buscamos si existe con soporte para todas las unidades
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
-    results = service.files().list(q=query, fields="files(id, owners)").execute()
+    results = service.files().list(
+        q=query, 
+        fields="files(id)",
+        supportsAllDrives=True,
+        includeItemsFromTrash=False
+    ).execute()
     files = results.get('files', [])
 
     if files:
         file_id = files[0]['id']
-        # Si existe, actualizamos el contenido (aquí no hay problema de cuota porque el dueño ya eres tú)
-        service.files().update(fileId=file_id, media_body=media).execute()
+        # Actualizar: Al actualizar un archivo que ya está en tu carpeta, usa TU cuota
+        service.files().update(
+            fileId=file_id, 
+            media_body=media,
+            supportsAllDrives=True
+        ).execute()
     else:
-        # 2. Si no existe, lo creamos
+        # Crear: Forzamos que se cree directamente bajo tu jerarquía
         file_metadata = {
             'name': file_name,
             'parents': [DRIVE_FOLDER_ID]
         }
         
-        # Creamos el archivo
-        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        file = service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields='id',
+            supportsAllDrives=True # CLAVE: Ignora la cuota del bot y usa la de la carpeta
+        ).execute()
         file_id = file.get('id')
         
-        # 3. EL TRUCO SENIOR: Transferir la propiedad a tu cuenta de 2TB inmediatamente
-        try:
-            permission = {
-                'type': 'user',
-                'role': 'owner',
-                'emailAddress': 'analytics.data.jg.2025@gmail.com' # TU CORREO DE DUEÑO
-            }
-            # transferOwnership=True hace que el peso pase a tu cuenta y el Bot quede libre
-            service.permissions().create(
-                fileId=file_id, 
-                body=permission, 
-                transferOwnership=True,
-                fields='id'
-            ).execute()
-        except Exception as e:
-            print(f"Aviso en transferencia de {file_name}: {e}")
-
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 def procesar_tienda_batch(data, service_drive):
@@ -261,10 +257,11 @@ with ThreadPoolExecutor(max_workers=30) as exe:
 
 print(">> Generando y subiendo a Drive...")
 tienda_links = []
-# Procesamos uno por uno o pocos hilos para no saturar el API de Drive
 for data in df_final.groupby('Tienda'):
     res = procesar_tienda_batch(data, drive_service)
-    if res: tienda_links.append(res)
+    if res: 
+        tienda_links.append(res)
+        time.sleep(1) # Un segundo de respiro para que la API no se bloquee
 
 ss_client.worksheet("FLYER_TIENDA").clear()
 if tienda_links:
