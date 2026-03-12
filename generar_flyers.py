@@ -67,7 +67,7 @@ def descargar_y_cachear(url):
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         img = Image.open(BytesIO(res.content)).convert("RGBA")
-        img.thumbnail((540, 540)) # Un poco más pequeño para margen
+        img.thumbnail((540, 540)) 
         img.save(fname, "PNG")
         cache_memoria[url] = fname
     except: cache_memoria[url] = None
@@ -84,6 +84,34 @@ def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)
     else: draw.rectangle([x1 - radius, y1 - radius, x1, y1], fill=fill)
     if corners[3]: draw.pieslice([x0, y1 - radius * 2, x0 + radius * 2, y1], 90, 180, fill=fill)
     else: draw.rectangle([x0, y1 - radius, x0 + radius, y1], fill=fill)
+
+def limpiar_numero_peru(valor, es_precio=True):
+    """Lógica robusta para limpiar números de Perú con puntos y comas inconsistentes"""
+    s = str(valor).strip().replace(" ", "")
+    if s in ["0", "0.0", "", "nan", "-", "SIN PRECIO"]:
+        return "SIN PRECIO" if es_precio else "-"
+    
+    # Caso 1: Tiene coma de miles, la quitamos
+    if "," in s and "." in s:
+        s = s.replace(",", "")
+    elif "," in s and "." not in s:
+        # Si la coma parece ser decimal (ej. 39,90)
+        if len(s.split(",")[1]) <= 2:
+            s = s.replace(",", ".")
+        else: # Si la coma es de miles (ej. 6,180)
+            s = s.replace(",", "")
+
+    # Caso 2: Manejo de puntos fantasmas (6.180 -> 6180)
+    if "." in s:
+        partes = s.split(".")
+        # Si hay 3 dígitos después del punto, es miles, no decimal
+        if len(partes[1]) == 3:
+            s = s.replace(".", "")
+        # Si el decimal es .00 o .0 se quita
+        elif partes[1] in ["00", "0"]:
+            s = partes[0]
+            
+    return s
 
 def crear_flyer(productos, tienda_nombre, num_pag):
     es_efe = "EFE" in tienda_nombre.upper()
@@ -132,14 +160,9 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
-        # --- Lógica de Stock Corregida ---
-        s_val = str(prod.get('Stock LM', '0')).strip()
-        if s_val in ["0", "", "nan", "-"]: 
-            stock_txt, color_st = "-", GRIS_MARCA
-        else: 
-            # Quitamos puntos y comas de miles para asegurar que 6.180 sea 6180
-            stock_txt = s_val.replace(".", "").replace(",", "")
-            color_st = (EFE_AZUL if es_efe else LC_AMARILLO)
+        # --- STOCK ---
+        stock_txt = limpiar_numero_peru(prod.get('Stock LM', '0'), es_precio=False)
+        color_st = GRIS_MARCA if stock_txt == "-" else (EFE_AZUL if es_efe else LC_AMARILLO)
         
         draw.rounded_rectangle([x+30, y+30, x+300, y+160], radius=20, fill=color_st)
         draw.text((x+165, y+65), "STOCK", font=ImageFont.truetype(FONT_BOLD_COND, 35), fill=BLANCO if es_efe else NEGRO, anchor="mm")
@@ -158,21 +181,8 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 65), fill=NEGRO)
             ty += 75
 
-        # --- Lógica de Precio Corregida ---
-        p_val = str(prod.get('Precio Vigente', '0')).strip()
-        if p_val in ["0", "", "nan", "SIN PRECIO", "0.0"]:
-            p_final = "SIN PRECIO"
-        else:
-            # Eliminamos comas de miles si existen
-            p_limpio = p_val.replace(",", "")
-            # Si tiene punto decimal, evaluamos si es .00 para quitarlo
-            if "." in p_limpio:
-                base, decimal = p_limpio.split(".", 1)
-                if decimal in ["00", "0", ""]: p_final = base
-                else: p_final = p_limpio
-            else:
-                p_final = p_limpio
-
+        # --- PRECIO ---
+        p_final = limpiar_numero_peru(prod.get('Precio Vigente', '0'), es_precio=True)
         ty_p = y + 420
         draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_slogan_bg, (True, True, False, False))
         
@@ -188,7 +198,6 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             draw.text((start_x, ty_p + 105), t_sol, font=f_sol, fill=BLANCO if es_efe else NEGRO, anchor="ls")
             draw.text((start_x + w_sol, ty_p + 115), p_final, font=f_num, fill=BLANCO if es_efe else NEGRO, anchor="ls")
 
-        # --- SKU Sin prefijo ---
         sku_val = str(prod['SKU'])
         sku_c = NEGRO if not es_efe else EFE_NARANJA
         draw_custom_rounded(draw, [tx, ty_p+180, tx+area_w, ty_p+280], 25, sku_c, (False, False, True, True))
@@ -196,6 +205,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
 
     return flyer
 
+# (Las funciones gestionar_archivo_drive y procesar_tienda_batch se mantienen igual)
 def gestionar_archivo_drive(service, file_path, file_name):
     media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
