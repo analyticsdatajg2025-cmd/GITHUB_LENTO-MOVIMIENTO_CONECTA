@@ -67,28 +67,21 @@ def descargar_y_cachear(url):
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         img = Image.open(BytesIO(res.content)).convert("RGBA")
-        # Reducimos un poco el thumbnail para que no choque con los bordes
-        img.thumbnail((580, 580)) 
+        img.thumbnail((540, 540)) # Un poco más pequeño para margen
         img.save(fname, "PNG")
         cache_memoria[url] = fname
     except: cache_memoria[url] = None
 
 def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)):
-    """Dibuja un rectángulo con esquinas redondeadas selectivas"""
     x0, y0, x1, y1 = xy
     draw.rectangle([x0 + radius, y0, x1 - radius, y1], fill=fill)
     draw.rectangle([x0, y0 + radius, x1, y1 - radius], fill=fill)
-    
-    # Esquinas: (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
     if corners[0]: draw.pieslice([x0, y0, x0 + radius * 2, y0 + radius * 2], 180, 270, fill=fill)
     else: draw.rectangle([x0, y0, x0 + radius, y0 + radius], fill=fill)
-    
     if corners[1]: draw.pieslice([x1 - radius * 2, y0, x1, y0 + radius * 2], 270, 360, fill=fill)
     else: draw.rectangle([x1 - radius, y0, x1, y0 + radius], fill=fill)
-    
     if corners[2]: draw.pieslice([x1 - radius * 2, y1 - radius * 2, x1, y1], 0, 90, fill=fill)
     else: draw.rectangle([x1 - radius, y1 - radius, x1, y1], fill=fill)
-    
     if corners[3]: draw.pieslice([x0, y1 - radius * 2, x0 + radius * 2, y1], 90, 180, fill=fill)
     else: draw.rectangle([x0, y1 - radius, x0 + radius, y1], fill=fill)
 
@@ -110,13 +103,11 @@ def crear_flyer(productos, tienda_nombre, num_pag):
                 logo = ImageOps.contain(l, (390, 390))
                 flyer.paste(logo, (ANCHO-540+(460-logo.width)//2, 40+(460-logo.height)//2), logo)
             else:
-                # Contenedor Logo La Curacao: Arriba Recto, Abajo Redondeado
                 draw_custom_rounded(draw, [ANCHO-580, 0, ANCHO-80, 380], 50, BLANCO, (False, False, True, True))
                 logo = ImageOps.contain(l, (425, 300))
                 flyer.paste(logo, (ANCHO-580+(500-logo.width)//2, 50), logo)
     except: pass
 
-    # Nombre Tienda
     f_tienda = ImageFont.truetype(FONT_EXTRABOLD_COND, 90)
     txt_tienda = tienda_nombre.upper()
     tw_t = draw.textlength(txt_tienda, font=f_tienda)
@@ -128,39 +119,36 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         draw.polygon([(p_x, 720), (p_x + 100, 520), (ANCHO, 520), (ANCHO, 720)], fill=NEGRO)
         draw.text((ANCHO - tw_t - 100, 570), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
 
-    # Fecha: Derecha Redondeada, Izquierda Recta
     f_fecha = ImageFont.truetype(FONT_BOLD_COND, 45)
     txt_gen = f"Generado: {fecha_peru} - PÁG {num_pag}"
     draw_custom_rounded(draw, [0, 850, 850, 960], 40, BLANCO, (False, True, True, False))
     draw.text((40, 880), txt_gen, font=f_fecha, fill=NEGRO)
 
-    # Slogan
     draw.rectangle([0, 1030, ANCHO, 1260], fill=color_slogan_bg)
     draw.text((ANCHO//2, 1145), "¡APROVECHA ESTAS INCREÍBLES OFERTAS!", font=ImageFont.truetype(FONT_EXTRABOLD, 105), fill=BLANCO if es_efe else NEGRO, anchor="mm")
 
-    # Grilla de Productos
     anchos, altos = [110, 1300], [1350, 2150, 2950]
     for i, prod in enumerate(productos):
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
-        # --- Lógica de Stock ---
-        stock_raw = str(prod.get('Stock LM', '0')).replace(".", "").replace(",", "").strip()
-        if stock_raw in ["0", "", "nan"]: 
+        # --- Lógica de Stock Corregida ---
+        s_val = str(prod.get('Stock LM', '0')).strip()
+        if s_val in ["0", "", "nan", "-"]: 
             stock_txt, color_st = "-", GRIS_MARCA
         else: 
-            stock_txt, color_st = stock_raw, (EFE_AZUL if es_efe else LC_AMARILLO)
+            # Quitamos puntos y comas de miles para asegurar que 6.180 sea 6180
+            stock_txt = s_val.replace(".", "").replace(",", "")
+            color_st = (EFE_AZUL if es_efe else LC_AMARILLO)
         
-        # Recuadro Stock rediseñado
         draw.rounded_rectangle([x+30, y+30, x+300, y+160], radius=20, fill=color_st)
         draw.text((x+165, y+65), "STOCK", font=ImageFont.truetype(FONT_BOLD_COND, 35), fill=BLANCO if es_efe else NEGRO, anchor="mm")
         draw.text((x+165, y+115), stock_txt, font=ImageFont.truetype(FONT_BOLD_COND, 55), fill=BLANCO if es_efe else NEGRO, anchor="mm")
 
-        # Imagen Producto (más pequeña y centrada para que no se salga)
         path_img = cache_memoria.get(prod.get('image_link'))
         if path_img:
             with Image.open(path_img) as img:
-                flyer.paste(img, (x+50, y+180), img)
+                flyer.paste(img, (x+50, y+185), img)
 
         tx, area_w = x + 600, 450
         draw.text((tx, y+80), str(prod.get('Marca', '')).upper(), font=ImageFont.truetype(FONT_SEMIBOLD, 55), fill=GRIS_MARCA)
@@ -170,33 +158,37 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             draw.text((tx, ty), line, font=ImageFont.truetype(FONT_REGULAR_COND, 65), fill=NEGRO)
             ty += 75
 
-        # --- Bloque Precio ---
-        p_raw = str(prod.get('Precio Vigente', '0')).replace(",", "").strip()
-        # Limpieza de decimales extra .00
-        if "." in p_raw:
-            parts = p_raw.split(".")
-            if parts[1] == "00" or parts[1] == "0": p_final = parts[0]
-            else: p_final = p_raw
-        else: p_final = p_raw
+        # --- Lógica de Precio Corregida ---
+        p_val = str(prod.get('Precio Vigente', '0')).strip()
+        if p_val in ["0", "", "nan", "SIN PRECIO", "0.0"]:
+            p_final = "SIN PRECIO"
+        else:
+            # Eliminamos comas de miles si existen
+            p_limpio = p_val.replace(",", "")
+            # Si tiene punto decimal, evaluamos si es .00 para quitarlo
+            if "." in p_limpio:
+                base, decimal = p_limpio.split(".", 1)
+                if decimal in ["00", "0", ""]: p_final = base
+                else: p_final = p_limpio
+            else:
+                p_final = p_limpio
 
         ty_p = y + 420
-        # Precio: Solo esquinas exteriores redondeadas (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
         draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_slogan_bg, (True, True, False, False))
         
-        if p_final in ["0", "", "nan", "SIN PRECIO"]:
+        if p_final == "SIN PRECIO":
             draw.text((tx + area_w//2, ty_p + 90), "SIN PRECIO", font=ImageFont.truetype(FONT_EXTRABOLD, 80), fill=BLANCO if es_efe else NEGRO, anchor="mm")
         else:
-            # S/ pequeño y número grande
-            font_sol = ImageFont.truetype(FONT_EXTRABOLD, 60)
-            font_num = ImageFont.truetype(FONT_EXTRABOLD, 110)
-            txt_sol = "S/ "
-            w_sol = draw.textlength(txt_sol, font=font_sol)
-            w_num = draw.textlength(p_final, font=font_num)
+            f_sol = ImageFont.truetype(FONT_EXTRABOLD, 60)
+            f_num = ImageFont.truetype(FONT_EXTRABOLD, 110)
+            t_sol = "S/ "
+            w_sol = draw.textlength(t_sol, font=f_sol)
+            w_num = draw.textlength(p_final, font=f_num)
             start_x = tx + (area_w - (w_sol + w_num)) // 2
-            draw.text((start_x, ty_p + 105), txt_sol, font=font_sol, fill=BLANCO if es_efe else NEGRO, anchor="ls")
-            draw.text((start_x + w_sol, ty_p + 115), p_final, font=font_num, fill=BLANCO if es_efe else NEGRO, anchor="ls")
+            draw.text((start_x, ty_p + 105), t_sol, font=f_sol, fill=BLANCO if es_efe else NEGRO, anchor="ls")
+            draw.text((start_x + w_sol, ty_p + 115), p_final, font=f_num, fill=BLANCO if es_efe else NEGRO, anchor="ls")
 
-        # --- Bloque SKU (Sin texto "SKU:") ---
+        # --- SKU Sin prefijo ---
         sku_val = str(prod['SKU'])
         sku_c = NEGRO if not es_efe else EFE_NARANJA
         draw_custom_rounded(draw, [tx, ty_p+180, tx+area_w, ty_p+280], 25, sku_c, (False, False, True, True))
@@ -204,7 +196,6 @@ def crear_flyer(productos, tienda_nombre, num_pag):
 
     return flyer
 
-# (Las funciones gestionar_archivo_drive y procesar_tienda_batch se mantienen igual)
 def gestionar_archivo_drive(service, file_path, file_name):
     media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"

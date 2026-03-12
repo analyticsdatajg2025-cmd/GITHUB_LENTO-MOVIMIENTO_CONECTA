@@ -2,7 +2,7 @@ name: Generar Flyers Automaticamente
 
 on:
   schedule:
-    - cron: '0 20 * * *' # 3 PM Hora Perú
+    - cron: '0 16 * * *' # 3 PM Hora Perú
   workflow_dispatch:
   push:
     branches: [ main ]
