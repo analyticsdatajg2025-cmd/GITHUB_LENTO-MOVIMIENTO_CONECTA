@@ -161,35 +161,20 @@ def crear_flyer(productos, tienda_nombre, num_pag):
 
 def gestionar_archivo_drive(service, file_path, file_name):
     media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
+    mi_correo = "analytics.data.jg.2025@gmail.com" # Tu correo de dueño de los 2TB
     
-    # Buscamos si existe con los parámetros correctos de la API v3
+    # 1. Buscar si el archivo ya existe
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
-    
-    # LLAMADA LIMPIA: Sin parámetros conflictivos
-    results = service.files().list(
-        q=query, 
-        fields="files(id)",
-        supportsAllDrives=True,
-        includeTeamDriveItems=True
-    ).execute()
-    
+    results = service.files().list(q=query, fields="files(id)", supportsAllDrives=True).execute()
     files = results.get('files', [])
 
     if files:
         file_id = files[0]['id']
-        # Actualizar archivo existente
-        service.files().update(
-            fileId=file_id, 
-            media_body=media,
-            supportsAllDrives=True
-        ).execute()
+        # Actualizar contenido (aquí no suele dar error de cuota si ya eres el dueño)
+        service.files().update(fileId=file_id, media_body=media, supportsAllDrives=True).execute()
     else:
-        # Crear archivo nuevo
-        file_metadata = {
-            'name': file_name,
-            'parents': [DRIVE_FOLDER_ID]
-        }
-        
+        # 2. Crear archivo nuevo
+        file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
         file = service.files().create(
             body=file_metadata, 
             media_body=media, 
@@ -198,6 +183,24 @@ def gestionar_archivo_drive(service, file_path, file_name):
         ).execute()
         file_id = file.get('id')
         
+        # 3. TRUCO SENIOR: Transferir propiedad para usar tus 2TB
+        try:
+            permission = {
+                'type': 'user',
+                'role': 'owner',
+                'emailAddress': 'analytics.data.jg.2025@gmail.com'
+
+            }
+            # transferOwnership=True es lo que desbloquea la cuota
+            service.permissions().create(
+                fileId=file_id, 
+                body=permission, 
+                transferOwnership=True,
+                supportsAllDrives=True
+            ).execute()
+        except Exception as e:
+            print(f"Nota en transferencia: {e}")
+
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 def procesar_tienda_batch(data, service_drive):
