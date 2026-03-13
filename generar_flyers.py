@@ -73,27 +73,30 @@ def descargar_y_cachear(url):
     except: cache_memoria[url] = None
 
 def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)):
+    """Dibuja un rectángulo con esquinas redondeadas selectivas sin errores de píxeles"""
     x0, y0, x1, y1 = xy
+    # Cuerpo central
     draw.rectangle([x0 + radius, y0, x1 - radius, y1], fill=fill)
     draw.rectangle([x0, y0 + radius, x1, y1 - radius], fill=fill)
+    
+    # Esquinas: (TL, TR, BR, BL)
     if corners[0]: draw.pieslice([x0, y0, x0 + radius * 2, y0 + radius * 2], 180, 270, fill=fill)
     else: draw.rectangle([x0, y0, x0 + radius, y0 + radius], fill=fill)
+    
     if corners[1]: draw.pieslice([x1 - radius * 2, y0, x1, y0 + radius * 2], 270, 360, fill=fill)
-    else: draw.rectangle([x1 - radius, y1 - radius, x1, y1], fill=fill) # Fix simple
+    else: draw.rectangle([x1 - radius, y0, x1, y0 + radius], fill=fill)
+    
     if corners[2]: draw.pieslice([x1 - radius * 2, y1 - radius * 2, x1, y1], 0, 90, fill=fill)
     else: draw.rectangle([x1 - radius, y1 - radius, x1, y1], fill=fill)
+    
     if corners[3]: draw.pieslice([x0, y1 - radius * 2, x0 + radius * 2, y1], 90, 180, fill=fill)
     else: draw.rectangle([x0, y1 - radius, x0 + radius, y1], fill=fill)
 
 def limpiar_valor_puro(valor, es_precio=True):
-    """Retorna el valor tal cual llega de la celda sin formato, usando '-' para vacíos"""
     s = str(valor).strip().replace(" ", "")
-    if s in ["0", "0.0", "", "nan", "-", "SIN PRECIO"]:
+    if s in ["0", "0.0", "", "nan", "-", "SIN PRECIO", "SINPRECIO"]:
         return "-"
-    
-    # Eliminar el .0 si existe al final del número
-    if s.endswith(".0"):
-        s = s[:-2]
+    if s.endswith(".0"): s = s[:-2]
     return s
 
 def crear_flyer(productos, tienda_nombre, num_pag):
@@ -114,6 +117,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
                 logo = ImageOps.contain(l, (390, 390))
                 flyer.paste(logo, (ANCHO-540+(460-logo.width)//2, 40+(460-logo.height)//2), logo)
             else:
+                # Logo LC: Solo redondeado abajo
                 draw_custom_rounded(draw, [ANCHO-580, 0, ANCHO-80, 380], 50, BLANCO, (False, False, True, True))
                 logo = ImageOps.contain(l, (425, 300))
                 flyer.paste(logo, (ANCHO-580+(500-logo.width)//2, 50), logo)
@@ -146,15 +150,13 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         # --- STOCK ---
         stock_txt = limpiar_valor_puro(prod.get('Stock LM', '0'), es_precio=False)
         color_st = GRIS_MARCA if stock_txt == "-" else (EFE_AZUL if es_efe else LC_AMARILLO)
-        
         draw.rounded_rectangle([x+30, y+30, x+300, y+160], radius=20, fill=color_st)
         draw.text((x+165, y+65), "STOCK", font=ImageFont.truetype(FONT_BOLD_COND, 35), fill=BLANCO if es_efe else NEGRO, anchor="mm")
         draw.text((x+165, y+115), stock_txt, font=ImageFont.truetype(FONT_BOLD_COND, 55), fill=BLANCO if es_efe else NEGRO, anchor="mm")
 
         path_img = cache_memoria.get(prod.get('image_link'))
         if path_img:
-            with Image.open(path_img) as img:
-                flyer.paste(img, (x+50, y+200), img)
+            with Image.open(path_img) as img: flyer.paste(img, (x+50, y+200), img)
 
         tx, area_w = x + 600, 450
         draw.text((tx, y+80), str(prod.get('Marca', '')).upper(), font=ImageFont.truetype(FONT_SEMIBOLD, 55), fill=GRIS_MARCA)
@@ -167,27 +169,24 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         # --- PRECIO ---
         p_final = limpiar_valor_puro(prod.get('Precio Vigente', '0'), es_precio=True)
         ty_p = y + 420
-        
-        # Bloque de precio: Gris si no hay precio (si es '-')
-        color_precio_bg = color_slogan_bg if p_final != "-" else GRIS_MARCA
-        draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_precio_bg, (True, True, False, False))
+        color_p_bg = color_slogan_bg if p_final != "-" else GRIS_MARCA
+        # Precio: Solo arriba redondeado
+        draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_p_bg, (True, True, False, False))
         
         if p_final == "-":
-            # Dibujar guion centrado si no hay precio
             draw.text((tx + area_w//2, ty_p + 90), "-", font=ImageFont.truetype(FONT_EXTRABOLD, 110), fill=BLANCO if es_efe else NEGRO, anchor="mm")
         else:
-            f_sol = ImageFont.truetype(FONT_EXTRABOLD, 60)
-            f_num = ImageFont.truetype(FONT_EXTRABOLD, 110)
+            f_sol, f_num = ImageFont.truetype(FONT_EXTRABOLD, 60), ImageFont.truetype(FONT_EXTRABOLD, 110)
             t_sol = "S/ "
-            w_sol = draw.textlength(t_sol, font=f_sol)
-            w_num = draw.textlength(p_final, font=f_num)
-            start_x = tx + (area_w - (w_sol + w_num)) // 2
-            draw.text((start_x, ty_p + 105), t_sol, font=f_sol, fill=BLANCO if es_efe else NEGRO, anchor="ls")
-            draw.text((start_x + w_sol, ty_p + 115), p_final, font=f_num, fill=BLANCO if es_efe else NEGRO, anchor="ls")
+            w_total = draw.textlength(t_sol, font=f_sol) + draw.textlength(p_final, font=f_num)
+            curr_x = tx + (area_w - w_total) // 2
+            draw.text((curr_x, ty_p + 105), t_sol, font=f_sol, fill=BLANCO if es_efe else NEGRO, anchor="ls")
+            draw.text((curr_x + draw.textlength(t_sol, font=f_sol), ty_p + 115), p_final, font=f_num, fill=BLANCO if es_efe else NEGRO, anchor="ls")
 
-        # --- SKU ---
+        # --- SKU (CORREGIDO ESQUINAS Y CUADRADITO) ---
         sku_val = str(prod['SKU'])
         sku_c = NEGRO if not es_efe else EFE_NARANJA
+        # SKU: Solo abajo redondeado (BR, BL). TL y TR quedan rectos (False, False)
         draw_custom_rounded(draw, [tx, ty_p+180, tx+area_w, ty_p+280], 25, sku_c, (False, False, True, True))
         draw.text((tx+area_w//2, ty_p+230), sku_val, font=ImageFont.truetype(FONT_BOLD_COND, 55), fill=BLANCO, anchor="mm")
 
