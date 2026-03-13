@@ -79,17 +79,17 @@ def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)
     if corners[0]: draw.pieslice([x0, y0, x0 + radius * 2, y0 + radius * 2], 180, 270, fill=fill)
     else: draw.rectangle([x0, y0, x0 + radius, y0 + radius], fill=fill)
     if corners[1]: draw.pieslice([x1 - radius * 2, y0, x1, y0 + radius * 2], 270, 360, fill=fill)
-    else: draw.rectangle([x1 - radius, y0, x1, y0 + radius], fill=fill)
+    else: draw.rectangle([x1 - radius, y1 - radius, x1, y1], fill=fill) # Fix simple
     if corners[2]: draw.pieslice([x1 - radius * 2, y1 - radius * 2, x1, y1], 0, 90, fill=fill)
     else: draw.rectangle([x1 - radius, y1 - radius, x1, y1], fill=fill)
     if corners[3]: draw.pieslice([x0, y1 - radius * 2, x0 + radius * 2, y1], 90, 180, fill=fill)
     else: draw.rectangle([x0, y1 - radius, x0 + radius, y1], fill=fill)
 
 def limpiar_valor_puro(valor, es_precio=True):
-    """Elimina el .0 innecesario y maneja valores vacíos"""
+    """Retorna el valor tal cual llega de la celda sin formato, usando '-' para vacíos"""
     s = str(valor).strip().replace(" ", "")
     if s in ["0", "0.0", "", "nan", "-", "SIN PRECIO"]:
-        return "SIN PRECIO" if es_precio else "-"
+        return "-"
     
     # Eliminar el .0 si existe al final del número
     if s.endswith(".0"):
@@ -168,15 +168,13 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         p_final = limpiar_valor_puro(prod.get('Precio Vigente', '0'), es_precio=True)
         ty_p = y + 420
         
-        # Color del bloque de precio: Gris si no hay precio
-        color_precio_bg = color_slogan_bg if p_final != "SIN PRECIO" else GRIS_MARCA
+        # Bloque de precio: Gris si no hay precio (si es '-')
+        color_precio_bg = color_slogan_bg if p_final != "-" else GRIS_MARCA
         draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_precio_bg, (True, True, False, False))
         
-        if p_final == "SIN PRECIO":
-            # Formato "SIN PRECIO" en dos filas, más pequeño y gris
-            f_sin = ImageFont.truetype(FONT_EXTRABOLD, 55)
-            draw.text((tx + area_w//2, ty_p + 55), "SIN", font=f_sin, fill=BLANCO if es_efe else NEGRO, anchor="mm")
-            draw.text((tx + area_w//2, ty_p + 125), "PRECIO", font=f_sin, fill=BLANCO if es_efe else NEGRO, anchor="mm")
+        if p_final == "-":
+            # Dibujar guion centrado si no hay precio
+            draw.text((tx + area_w//2, ty_p + 90), "-", font=ImageFont.truetype(FONT_EXTRABOLD, 110), fill=BLANCO if es_efe else NEGRO, anchor="mm")
         else:
             f_sol = ImageFont.truetype(FONT_EXTRABOLD, 60)
             f_num = ImageFont.truetype(FONT_EXTRABOLD, 110)
