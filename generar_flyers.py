@@ -67,7 +67,6 @@ def descargar_y_cachear(url):
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         img = Image.open(BytesIO(res.content)).convert("RGBA")
-        # Imagen un poco más pequeña (500px) para mejor margen
         img.thumbnail((500, 500)) 
         img.save(fname, "PNG")
         cache_memoria[url] = fname
@@ -87,10 +86,14 @@ def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)
     else: draw.rectangle([x0, y1 - radius, x0 + radius, y1], fill=fill)
 
 def limpiar_valor_puro(valor, es_precio=True):
-    """Retorna el valor tal cual llega de la celda sin formato"""
+    """Elimina el .0 innecesario y maneja valores vacíos"""
     s = str(valor).strip().replace(" ", "")
     if s in ["0", "0.0", "", "nan", "-", "SIN PRECIO"]:
         return "SIN PRECIO" if es_precio else "-"
+    
+    # Eliminar el .0 si existe al final del número
+    if s.endswith(".0"):
+        s = s[:-2]
     return s
 
 def crear_flyer(productos, tienda_nombre, num_pag):
@@ -151,7 +154,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         path_img = cache_memoria.get(prod.get('image_link'))
         if path_img:
             with Image.open(path_img) as img:
-                flyer.paste(img, (x+50, y+200), img) # Posición bajada para centrar mejor
+                flyer.paste(img, (x+50, y+200), img)
 
         tx, area_w = x + 600, 450
         draw.text((tx, y+80), str(prod.get('Marca', '')).upper(), font=ImageFont.truetype(FONT_SEMIBOLD, 55), fill=GRIS_MARCA)
@@ -164,11 +167,16 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         # --- PRECIO ---
         p_final = limpiar_valor_puro(prod.get('Precio Vigente', '0'), es_precio=True)
         ty_p = y + 420
-        draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_slogan_bg, (True, True, False, False))
+        
+        # Color del bloque de precio: Gris si no hay precio
+        color_precio_bg = color_slogan_bg if p_final != "SIN PRECIO" else GRIS_MARCA
+        draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_precio_bg, (True, True, False, False))
         
         if p_final == "SIN PRECIO":
-            # Fuente reducida para "SIN PRECIO" y sin "S/"
-            draw.text((tx + area_w//2, ty_p + 90), p_final, font=ImageFont.truetype(FONT_EXTRABOLD, 65), fill=BLANCO if es_efe else NEGRO, anchor="mm")
+            # Formato "SIN PRECIO" en dos filas, más pequeño y gris
+            f_sin = ImageFont.truetype(FONT_EXTRABOLD, 55)
+            draw.text((tx + area_w//2, ty_p + 55), "SIN", font=f_sin, fill=BLANCO if es_efe else NEGRO, anchor="mm")
+            draw.text((tx + area_w//2, ty_p + 125), "PRECIO", font=f_sin, fill=BLANCO if es_efe else NEGRO, anchor="mm")
         else:
             f_sol = ImageFont.truetype(FONT_EXTRABOLD, 60)
             f_num = ImageFont.truetype(FONT_EXTRABOLD, 110)
