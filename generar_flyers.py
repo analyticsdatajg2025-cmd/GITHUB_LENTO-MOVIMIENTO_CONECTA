@@ -67,7 +67,8 @@ def descargar_y_cachear(url):
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         img = Image.open(BytesIO(res.content)).convert("RGBA")
-        img.thumbnail((540, 540)) 
+        # Imagen un poco más pequeña (500px) para mejor margen
+        img.thumbnail((500, 500)) 
         img.save(fname, "PNG")
         cache_memoria[url] = fname
     except: cache_memoria[url] = None
@@ -85,32 +86,11 @@ def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)
     if corners[3]: draw.pieslice([x0, y1 - radius * 2, x0 + radius * 2, y1], 90, 180, fill=fill)
     else: draw.rectangle([x0, y1 - radius, x0 + radius, y1], fill=fill)
 
-def limpiar_numero_peru(valor, es_precio=True):
-    """Lógica robusta para limpiar números de Perú con puntos y comas inconsistentes"""
+def limpiar_valor_puro(valor, es_precio=True):
+    """Retorna el valor tal cual llega de la celda sin formato"""
     s = str(valor).strip().replace(" ", "")
     if s in ["0", "0.0", "", "nan", "-", "SIN PRECIO"]:
         return "SIN PRECIO" if es_precio else "-"
-    
-    # Caso 1: Tiene coma de miles, la quitamos
-    if "," in s and "." in s:
-        s = s.replace(",", "")
-    elif "," in s and "." not in s:
-        # Si la coma parece ser decimal (ej. 39,90)
-        if len(s.split(",")[1]) <= 2:
-            s = s.replace(",", ".")
-        else: # Si la coma es de miles (ej. 6,180)
-            s = s.replace(",", "")
-
-    # Caso 2: Manejo de puntos fantasmas (6.180 -> 6180)
-    if "." in s:
-        partes = s.split(".")
-        # Si hay 3 dígitos después del punto, es miles, no decimal
-        if len(partes[1]) == 3:
-            s = s.replace(".", "")
-        # Si el decimal es .00 o .0 se quita
-        elif partes[1] in ["00", "0"]:
-            s = partes[0]
-            
     return s
 
 def crear_flyer(productos, tienda_nombre, num_pag):
@@ -161,7 +141,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
         # --- STOCK ---
-        stock_txt = limpiar_numero_peru(prod.get('Stock LM', '0'), es_precio=False)
+        stock_txt = limpiar_valor_puro(prod.get('Stock LM', '0'), es_precio=False)
         color_st = GRIS_MARCA if stock_txt == "-" else (EFE_AZUL if es_efe else LC_AMARILLO)
         
         draw.rounded_rectangle([x+30, y+30, x+300, y+160], radius=20, fill=color_st)
@@ -171,7 +151,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         path_img = cache_memoria.get(prod.get('image_link'))
         if path_img:
             with Image.open(path_img) as img:
-                flyer.paste(img, (x+50, y+185), img)
+                flyer.paste(img, (x+50, y+200), img) # Posición bajada para centrar mejor
 
         tx, area_w = x + 600, 450
         draw.text((tx, y+80), str(prod.get('Marca', '')).upper(), font=ImageFont.truetype(FONT_SEMIBOLD, 55), fill=GRIS_MARCA)
@@ -182,12 +162,13 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             ty += 75
 
         # --- PRECIO ---
-        p_final = limpiar_numero_peru(prod.get('Precio Vigente', '0'), es_precio=True)
+        p_final = limpiar_valor_puro(prod.get('Precio Vigente', '0'), es_precio=True)
         ty_p = y + 420
         draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_slogan_bg, (True, True, False, False))
         
         if p_final == "SIN PRECIO":
-            draw.text((tx + area_w//2, ty_p + 90), "SIN PRECIO", font=ImageFont.truetype(FONT_EXTRABOLD, 80), fill=BLANCO if es_efe else NEGRO, anchor="mm")
+            # Fuente reducida para "SIN PRECIO" y sin "S/"
+            draw.text((tx + area_w//2, ty_p + 90), p_final, font=ImageFont.truetype(FONT_EXTRABOLD, 65), fill=BLANCO if es_efe else NEGRO, anchor="mm")
         else:
             f_sol = ImageFont.truetype(FONT_EXTRABOLD, 60)
             f_num = ImageFont.truetype(FONT_EXTRABOLD, 110)
@@ -198,6 +179,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             draw.text((start_x, ty_p + 105), t_sol, font=f_sol, fill=BLANCO if es_efe else NEGRO, anchor="ls")
             draw.text((start_x + w_sol, ty_p + 115), p_final, font=f_num, fill=BLANCO if es_efe else NEGRO, anchor="ls")
 
+        # --- SKU ---
         sku_val = str(prod['SKU'])
         sku_c = NEGRO if not es_efe else EFE_NARANJA
         draw_custom_rounded(draw, [tx, ty_p+180, tx+area_w, ty_p+280], 25, sku_c, (False, False, True, True))
@@ -205,7 +187,6 @@ def crear_flyer(productos, tienda_nombre, num_pag):
 
     return flyer
 
-# (Las funciones gestionar_archivo_drive y procesar_tienda_batch se mantienen igual)
 def gestionar_archivo_drive(service, file_path, file_name):
     media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
@@ -239,7 +220,6 @@ def procesar_tienda_batch(data, service_drive):
     except Exception as e: print(f"Error en {nombre}: {e}")
     return None
 
-# --- FLUJO PRINCIPAL ---
 ss_client, drive_service = conectar_servicios()
 df_raw = pd.DataFrame(ss_client.worksheet("Origen Tdas").get_all_records())
 df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3], 'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7], 'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]})
@@ -262,7 +242,6 @@ df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 with ThreadPoolExecutor(max_workers=30) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
-print(">> Generando y subiendo a Drive como Elías Figueroa...")
 tienda_links = []
 for data in df_final.groupby('Tienda'):
     res = procesar_tienda_batch(data, drive_service)
