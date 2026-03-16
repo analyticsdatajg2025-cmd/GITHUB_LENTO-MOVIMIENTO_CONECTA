@@ -194,6 +194,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
     return flyer
 
 def gestionar_archivo_drive(service, file_path, file_name):
+    # resumable=True ayuda a que subidas de 2 horas no fallen por micro-cortes
     media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
     query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
     results = service.files().list(q=query, fields="files(id)").execute()
@@ -214,23 +215,23 @@ def procesar_tienda_batch(data, service_drive):
         prods = grupo.to_dict('records')
         paginas = []
         for i in range(0, len(prods), 6):
-            paginas.append(crear_flyer(prods[i:i+6], str(nombre), (i//6)+1).convert("RGB"))
+            img_flyer = crear_flyer(prods[i:i+6], str(nombre), (i//6)+1).convert("RGB")
+            paginas.append(img_flyer)
         if paginas:
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
-            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=75, optimize=True)
+            # CALIDAD 65: Vital para que no falle la subida a Drive
+            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=65, optimize=True)
             
-            # 1. Cerramos las imágenes de las páginas
+            # Cerramos cada página para liberar memoria RAM de inmediato
             for p in paginas: p.close()
             
             link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
+            print(f">> Subido con éxito: {nombre}") # Mensaje de control para el log
             
-            # 2. EL CAMBIO CLAVE: Borramos la lista y liberamos RAM
             del paginas
-            import gc
             gc.collect() 
-            
             return [nombre, link_drive]
     except Exception as e: print(f"Error en {nombre}: {e}")
     return None
@@ -252,9 +253,12 @@ df_txl = pd.DataFrame(ss_client.worksheet("TiendasxLista").get_all_records())
 txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
+# Filtrado por semana (Añadí este print para que lo veas en el log)
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
+print(f">> Iniciando Semana: {semana_actual}. Productos a procesar: {len(df_final)}")
 
-with ThreadPoolExecutor(max_workers=20) as exe:
+# Bajamos a 10 para máxima estabilidad de RAM
+with ThreadPoolExecutor(max_workers=15) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
 tienda_links = []
@@ -262,7 +266,8 @@ for data in df_final.groupby('Tienda'):
     res = procesar_tienda_batch(data, drive_service)
     if res:
         tienda_links.append(res)
-        time.sleep(0.5)
+        time.sleep(1) # Pausa de alivio para que la red no se sature
+        gc.collect() # Limpieza tras cada tienda
 
 ss_client.worksheet("FLYER_TIENDA").clear()
 if tienda_links:
