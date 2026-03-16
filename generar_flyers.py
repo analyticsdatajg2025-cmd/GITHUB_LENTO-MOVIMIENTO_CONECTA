@@ -2,6 +2,7 @@ import pandas as pd
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from io import BytesIO
+import gc
 import os
 import gspread
 import json
@@ -219,8 +220,17 @@ def procesar_tienda_batch(data, service_drive):
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
             paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=85, optimize=True)
+            
+            # 1. Cerramos las imágenes de las páginas
             for p in paginas: p.close()
+            
             link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
+            
+            # 2. EL CAMBIO CLAVE: Borramos la lista y liberamos RAM
+            del paginas
+            import gc
+            gc.collect() 
+            
             return [nombre, link_drive]
     except Exception as e: print(f"Error en {nombre}: {e}")
     return None
@@ -244,7 +254,7 @@ df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 
-with ThreadPoolExecutor(max_workers=30) as exe:
+with ThreadPoolExecutor(max_workers=20) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
 tienda_links = []
