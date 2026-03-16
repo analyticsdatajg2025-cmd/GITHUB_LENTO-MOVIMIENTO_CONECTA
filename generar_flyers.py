@@ -219,7 +219,7 @@ def procesar_tienda_batch(data, service_drive):
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
-            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=85, optimize=True)
+            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=75, optimize=True)
             
             # 1. Cerramos las imágenes de las páginas
             for p in paginas: p.close()
