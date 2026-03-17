@@ -2,7 +2,7 @@ name: Generar Flyers Automaticamente
 
 on:
   schedule:
-    - cron: '0 20 * * *' # 3 PM Hora Perú (20:00 UTC)
+    - cron: '0 20 * * *' # 3 PM Hora Perú
   workflow_dispatch:
   push:
     branches: [ main ]
@@ -10,7 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Aumentamos a 6 horas por seguridad, ya que manejas 85k productos
     timeout-minutes: 360 
 
     steps:
@@ -31,9 +30,8 @@ jobs:
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
-          # Soluciona el aviso de Node.js 20 de forma global
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
-          # Evita que Python genere archivos .pyc innecesarios en el disco virtual
           PYTHONDONTWRITEBYTECODE: 1
-        # El comando python -u es VITAL para que los logs no se queden en el buffer
+          # Añadimos una variable para que Python no guarde buffers de salida
+          PYTHONUNBUFFERED: 1
         run: python -u generar_flyers.py

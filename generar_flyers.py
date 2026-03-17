@@ -253,26 +253,41 @@ print(f">> Iniciando Semana: {semana_actual}. Productos a procesar: {len(df_fina
 with ThreadPoolExecutor(max_workers=10) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
+# --- PROCESAMIENTO DE TIENDAS CON PROTECCIÓN ---
 tienda_links = []
 for data in df_final.groupby('Tienda'):
     try:
         res = procesar_tienda_batch(data, drive_service)
         if res:
             tienda_links.append(res)
+            # Imprimimos explícitamente para mantener vivo el log de GitHub
+            print(f"Acumulados: {len(tienda_links)} links listos para el Excel...")
             time.sleep(1) 
             gc.collect()
     except Exception as e:
-        print(f"!!! Error crítico saltado en tienda: {e}")
+        print(f"!!! Error saltado en tienda {data[0]}: {e}")
         continue 
 
+# --- ESCRITURA FINAL EN EXCEL (CON REINTENTO) ---
 if tienda_links:
-    try:
-        ws_output = ss_client.worksheet("FLYER_TIENDA")
-        ws_output.clear()
-        datos_subir = [["TIENDA", "LINK DRIVE"]] + tienda_links
-        ws_output.update('A1', datos_subir)
-        print(f">> Se escribieron {len(tienda_links)} tiendas en el Excel.")
-    except Exception as e:
-        print(f"Error al escribir en Sheets: {e}")
+    print(f">> Intentando escribir {len(tienda_links)} links en Google Sheets...")
+    for intento in range(3): # Reintenta 3 veces por si la red falla
+        try:
+            # Selecciona tu hoja específica
+            ws_output = ss_client.worksheet("FLYER_TIENDA") 
+            ws_output.clear()
+            
+            # Preparamos la data con encabezados
+            cuerpo_datos = [["TIENDA", "LINK DRIVE"]] + tienda_links
+            
+            # Actualizamos usando el método de rango para que sea más rápido
+            ws_output.update('A1', cuerpo_datos)
+            print(">> EXCEL ACTUALIZADO EXITOSAMENTE.")
+            break # Si funciona, salimos del bucle de reintentos
+        except Exception as e:
+            print(f"Intento {intento+1} fallido al escribir en Excel: {e}")
+            time.sleep(5)
+else:
+    print("!! No se generaron links para subir al Excel.")
 
-print(">> PROCESO COMPLETADO EXITOSAMENTE.")
+print(">> PROCESO COMPLETADO AL 100%.")
