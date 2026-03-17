@@ -253,41 +253,54 @@ print(f">> Iniciando Semana: {semana_actual}. Productos a procesar: {len(df_fina
 with ThreadPoolExecutor(max_workers=10) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
-# --- PROCESAMIENTO DE TIENDAS CON PROTECCIÓN ---
+# --- PROCESAMIENTO DE TIENDAS CON PROTECCIÓN Y ESCRITURA INCREMENTAL ---
 tienda_links = []
-for data in df_final.groupby('Tienda'):
+batch_size = 5  # Cada 5 tiendas guardaremos en el Excel para no perder info
+tiendas_procesadas = df_final.groupby('Tienda')
+total_tiendas = len(tiendas_procesadas)
+
+print(f">> Iniciando generación para {total_tiendas} tiendas.")
+
+for idx, data in enumerate(tiendas_procesadas):
     try:
         res = procesar_tienda_batch(data, drive_service)
         if res:
             tienda_links.append(res)
-            # Imprimimos explícitamente para mantener vivo el log de GitHub
-            print(f"Acumulados: {len(tienda_links)} links listos para el Excel...")
+            print(f"[{idx+1}/{total_tiendas}] >> Acumulados: {len(tienda_links)} links.")
+            
+            # --- ESCRITURA INCREMENTAL ---
+            if len(tienda_links) % batch_size == 0:
+                try:
+                    ws_output = ss_client.worksheet("FLYER_TIENDA")
+                    # No hacemos .clear() aquí para no borrar lo anterior, 
+                    # simplemente sobreescribimos desde A1 con todo lo acumulado
+                    cuerpo_incremental = [["TIENDA", "LINK DRIVE"]] + tienda_links
+                    ws_output.update('A1', cuerpo_incremental)
+                    print(f"!!! INFO: Backup incremental guardado en Excel ({len(tienda_links)} links).")
+                except:
+                    print("!!! Advertencia: Falló el backup incremental, pero el proceso sigue.")
+            
             time.sleep(1) 
             gc.collect()
     except Exception as e:
         print(f"!!! Error saltado en tienda {data[0]}: {e}")
         continue 
 
-# --- ESCRITURA FINAL EN EXCEL (CON REINTENTO) ---
+# --- ESCRITURA FINAL DEFINITIVA ---
 if tienda_links:
-    print(f">> Intentando escribir {len(tienda_links)} links en Google Sheets...")
-    for intento in range(3): # Reintenta 3 veces por si la red falla
+    print(f">> Finalizando: Escribiendo lista completa de {len(tienda_links)} tiendas...")
+    for intento in range(3):
         try:
-            # Selecciona tu hoja específica
-            ws_output = ss_client.worksheet("FLYER_TIENDA") 
+            ws_output = ss_client.worksheet("FLYER_TIENDA")
             ws_output.clear()
-            
-            # Preparamos la data con encabezados
             cuerpo_datos = [["TIENDA", "LINK DRIVE"]] + tienda_links
-            
-            # Actualizamos usando el método de rango para que sea más rápido
             ws_output.update('A1', cuerpo_datos)
-            print(">> EXCEL ACTUALIZADO EXITOSAMENTE.")
-            break # Si funciona, salimos del bucle de reintentos
+            print(">> EXCEL ACTUALIZADO EXITOSAMENTE AL 100%.")
+            break
         except Exception as e:
-            print(f"Intento {intento+1} fallido al escribir en Excel: {e}")
+            print(f"Intento {intento+1} fallido: {e}")
             time.sleep(5)
 else:
-    print("!! No se generaron links para subir al Excel.")
+    print("!! No se generaron links.")
 
-print(">> PROCESO COMPLETADO AL 100%.")
+print(">> PROCESO COMPLETADO.")

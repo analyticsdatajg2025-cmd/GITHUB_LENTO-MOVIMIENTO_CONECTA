@@ -32,6 +32,7 @@ jobs:
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
           PYTHONDONTWRITEBYTECODE: 1
-          # Añadimos una variable para que Python no guarde buffers de salida
           PYTHONUNBUFFERED: 1
-        run: python -u generar_flyers.py
+        run: |
+          git config --global http.postBuffer 524288000
+          python -u generar_flyers.py
