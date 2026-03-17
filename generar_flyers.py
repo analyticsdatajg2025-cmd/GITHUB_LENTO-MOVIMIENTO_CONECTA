@@ -263,13 +263,25 @@ with ThreadPoolExecutor(max_workers=15) as exe:
 
 tienda_links = []
 for data in df_final.groupby('Tienda'):
-    res = procesar_tienda_batch(data, drive_service)
-    if res:
-        tienda_links.append(res)
-        time.sleep(1) # Pausa de alivio para que la red no se sature
-        gc.collect() # Limpieza tras cada tienda
+    try:
+        res = procesar_tienda_batch(data, drive_service)
+        if res:
+            tienda_links.append(res)
+            time.sleep(1) 
+            gc.collect()
+    except Exception as e:
+        print(f"!!! Error crítico saltado en tienda: {e}")
+        continue # SI FALLA UNA, SIGUE CON LA OTRA
 
-ss_client.worksheet("FLYER_TIENDA").clear()
 if tienda_links:
-    ss_client.worksheet("FLYER_TIENDA").update([["TIENDA", "LINK DRIVE"]] + tienda_links, range_name='A1')
+    try:
+        ws_output = ss_client.worksheet("FLYER_TIENDA")
+        ws_output.clear()
+        # Formato de lista de listas para la actualización
+        datos_subir = [["TIENDA", "LINK DRIVE"]] + tienda_links
+        ws_output.update('A1', datos_subir)
+        print(f">> Se escribieron {len(tienda_links)} tiendas en el Excel.")
+    except Exception as e:
+        print(f"Error al escribir en Sheets: {e}")
+
 print(">> PROCESO COMPLETADO EXITOSAMENTE.")
