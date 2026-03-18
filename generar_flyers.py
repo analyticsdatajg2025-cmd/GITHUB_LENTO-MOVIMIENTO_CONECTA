@@ -214,8 +214,9 @@ def procesar_tienda_batch(data, service_drive):
         
         for i in range(0, len(prods), 6):
             pag_actual = (i//6)+1
-            # Esto es VITAL: Mantiene a GitHub entretenido viendo actividad
-            print(f"   [Procesando {nombre} | Pag {pag_actual}/{total_pags} | {len(prods)} SKUs]", flush=True)
+            # Añadimos la hora actual al log para que cada línea sea única
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            print(f"   [{timestamp}] [Procesando {nombre} | Pag {pag_actual}/{total_pags}]", flush=True)
             
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             paginas.append(img_flyer)
@@ -233,7 +234,11 @@ def procesar_tienda_batch(data, service_drive):
             del paginas
             
             link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
-            print(f">> ÉXITO TOTAL: {nombre} | Link: {link_drive}")
+            print(f">> ÉXITO TOTAL: {nombre}")
+            
+            # LIBERAR DISCO: Borramos el PDF local una vez subido a Drive
+            if os.path.exists(local_path):
+                os.remove(local_path)
             
             gc.collect() 
             return [nombre, link_drive]
@@ -282,7 +287,7 @@ except Exception as e:
     print(f"!!! Advertencia: No se pudo actualizar 'Detalle de Inventario': {e}")
 
 # Bajamos a 10 para máxima estabilidad de RAM ante 85k productos
-with ThreadPoolExecutor(max_workers=8) as exe:
+with ThreadPoolExecutor(max_workers=6) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
 # --- PROCESAMIENTO DE TIENDAS CON PROTECCIÓN Y ESCRITURA INCREMENTAL ---
