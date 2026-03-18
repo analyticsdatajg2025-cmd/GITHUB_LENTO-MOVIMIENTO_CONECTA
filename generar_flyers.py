@@ -210,21 +210,35 @@ def procesar_tienda_batch(data, service_drive):
     try:
         prods = grupo.to_dict('records')
         paginas = []
+        total_pags = (len(prods) + 5) // 6
+        
         for i in range(0, len(prods), 6):
-            img_flyer = crear_flyer(prods[i:i+6], str(nombre), (i//6)+1).convert("RGB")
+            pag_actual = (i//6)+1
+            # Esto es VITAL: Mantiene a GitHub entretenido viendo actividad
+            print(f"   [Procesando {nombre} | Pag {pag_actual}/{total_pags} | {len(prods)} SKUs]", flush=True)
+            
+            img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             paginas.append(img_flyer)
+        
         if paginas:
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
-            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=65, optimize=True)
+            
+            # Guardado optimizado
+            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=60, optimize=True)
+            
+            # Liberación inmediata de RAM
             for p in paginas: p.close()
-            link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
-            print(f">> Subido con éxito: {nombre}")
             del paginas
+            
+            link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
+            print(f">> ÉXITO TOTAL: {nombre} | Link: {link_drive}")
+            
             gc.collect() 
             return [nombre, link_drive]
-    except Exception as e: print(f"Error en {nombre}: {e}")
+    except Exception as e: 
+        print(f"\n!!! ERROR CRÍTICO en {nombre}: {e}")
     return None
 
 # --- FLUJO ---
@@ -244,13 +258,31 @@ for p in ["Promo01", "Promo03", "Promo04"]:
 df_txl = pd.DataFrame(ss_client.worksheet("TiendasxLista").get_all_records())
 txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
+
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
 
+# --- FILTRADO POR SEMANA ---
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 print(f">> Iniciando Semana: {semana_actual}. Productos a procesar: {len(df_final)}")
 
+# --- VOLCADO A "Detalle de Inventario" (Tu Data Maestra) ---
+try:
+    print(">> Actualizando hoja 'Detalle de Inventario' con la data maestra...")
+    ws_inventario = ss_client.worksheet("Detalle de Inventario")
+    ws_inventario.clear()
+    
+    # Preparamos los datos incluyendo los encabezados exactos que pediste
+    columnas_maestras = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
+    data_maestra = [columnas_maestras] + df_final[columnas_maestras].fillna("-").values.tolist()
+    
+    # Escritura masiva (mucho más rápido)
+    ws_inventario.update('A1', data_maestra)
+    print(">> OK: Hoja 'Detalle de Inventario' actualizada exitosamente.")
+except Exception as e:
+    print(f"!!! Advertencia: No se pudo actualizar 'Detalle de Inventario': {e}")
+
 # Bajamos a 10 para máxima estabilidad de RAM ante 85k productos
-with ThreadPoolExecutor(max_workers=10) as exe:
+with ThreadPoolExecutor(max_workers=8) as exe:
     exe.map(descargar_y_cachear, df_final['image_link'].unique())
 
 # --- PROCESAMIENTO DE TIENDAS CON PROTECCIÓN Y ESCRITURA INCREMENTAL ---
