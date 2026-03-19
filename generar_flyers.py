@@ -268,13 +268,25 @@ total_tiendas_global = len(tiendas_procesadas)
 if len(sys.argv) > 2:
     inicio = int(sys.argv[1])
     fin = int(sys.argv[2])
-    # Ajustamos el fin para no salir del rango
+    
+    # --- SOLUCIÓN ERROR 429: ESCALONAMIENTO ---
+    # Cada máquina espera un poco para no atacar a Google Sheets al mismo tiempo
+    espera = (inicio // 50) * 20  # Máquina 50 espera 20s, Máquina 100 espera 40s...
+    if inicio > 0:
+        print(f">>> [!] ESCALONAMIENTO: Esperando {espera} segundos para evitar bloqueo de Google Sheets API...", flush=True)
+        time.sleep(espera)
+    
     fin = min(fin, total_tiendas_global)
     tiendas_a_procesar = tiendas_procesadas[inicio:fin]
     print(f"\n>>> MÁQUINA TRABAJANDO RANGO: {inicio} a {fin} (Total en este hilo: {len(tiendas_a_procesar)})")
 else:
     tiendas_a_procesar = tiendas_procesadas
     print(f"\n>>> TRABAJANDO TODO EL BLOQUE: {total_tiendas_global} tiendas.")
+
+# --- SOLUCIÓN ERROR CONCATENACIÓN: VALIDAR SI HAY TIENDAS ---
+if not tiendas_a_procesar:
+    print(">>> [!] AVISO: No hay tiendas en este rango para procesar. Finalizando con éxito.")
+    sys.exit(0) # Salida limpia para que GitHub se ponga en VERDE
 
 # Descargamos solo las imágenes necesarias para este rango (optimiza RAM)
 urls_rango = pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique()
@@ -293,7 +305,7 @@ for idx, data in enumerate(tiendas_a_procesar):
             
             if len(tienda_links) % batch_size == 0:
                 try:
-                    # En modo matriz, agregamos filas al final en lugar de sobreescribir A1 para no borrar lo de otros hilos
+                    # En modo matriz, agregamos filas al final
                     ws_output = ss_client.worksheet("FLYER_TIENDA")
                     ws_output.append_rows(tienda_links[-batch_size:]) 
                     print("!!! INFO: Backup incremental (Matriz) guardado.")
@@ -301,16 +313,19 @@ for idx, data in enumerate(tiendas_a_procesar):
                     if len(tienda_links) % 15 == 0:
                         cache_memoria.clear()
                         gc.collect()
-                except Exception as e: print(f"Error backup: {e}")
+                except Exception as e: 
+                    print(f"Error backup incremental: {e}")
+                    time.sleep(5) # Pausa por si es un error de cuota temporal
+            
             time.sleep(1) 
     except Exception as e:
+        print(f"!!! Error saltado en tienda {data[0]}: {e}")
         continue 
 
 # Escritura final (Solo agrega lo que procesó esta máquina)
 if tienda_links:
     try:
         ws_output = ss_client.worksheet("FLYER_TIENDA")
-        # Agregamos lo restante que no se guardó en el batch
         sobrantes = len(tienda_links) % batch_size
         if sobrantes > 0:
             ws_output.append_rows(tienda_links[-sobrantes:])
