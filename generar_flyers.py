@@ -1,3 +1,4 @@
+import sys # <--- IMPORTANTE: Necesario para leer los rangos de la matriz
 import pandas as pd
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -32,14 +33,13 @@ semana_actual = f"Sem{ahora_peru.isocalendar()[1]}"
 
 cache_memoria = {}
 
-# --- PRE-CARGA DE FUENTES (MÁS RÁPIDO) ---
+# --- PRE-CARGA DE FUENTES ---
 FONT_BOLD_COND = "Mark Simonson - Proxima Nova Alt Condensed Bold.otf"
 FONT_EXTRABOLD_COND = "Mark Simonson - Proxima Nova Alt Condensed Extrabold.otf"
 FONT_REGULAR_COND = "Mark Simonson - Proxima Nova Alt Condensed Regular.otf"
 FONT_EXTRABOLD = "Mark Simonson - Proxima Nova Extrabold.otf"
 FONT_SEMIBOLD = "Mark Simonson - Proxima Nova Semibold.otf"
 
-# Cargamos las fuentes una sola vez al inicio para ahorrar CPU
 f_tienda = ImageFont.truetype(FONT_EXTRABOLD_COND, 90)
 f_fecha = ImageFont.truetype(FONT_BOLD_COND, 45)
 f_slogan = ImageFont.truetype(FONT_EXTRABOLD, 105)
@@ -51,7 +51,6 @@ f_sku = ImageFont.truetype(FONT_BOLD_COND, 55)
 f_stock_tag = ImageFont.truetype(FONT_BOLD_COND, 35)
 f_stock_val = ImageFont.truetype(FONT_BOLD_COND, 55)
 
-# Colores
 LC_AMARILLO, LC_AMARILLO_OSCURO = (255, 203, 5), (235, 180, 0)
 EFE_AZUL, EFE_AZUL_OSCURO = (0, 107, 213), (0, 60, 150)
 EFE_NARANJA, BLANCO, NEGRO, GRIS_MARCA = (255, 100, 0), (255, 255, 255), (0, 0, 0), (100, 100, 100)
@@ -112,7 +111,6 @@ def crear_flyer(productos, tienda_nombre, num_pag):
     color_slogan_bg = EFE_AZUL if es_efe else LC_AMARILLO
     flyer = Image.new('RGB', (ANCHO, ALTO), color=color_fondo)
     draw = ImageDraw.Draw(flyer)
-    
     try:
         bg_p = "efe tienda.jpg" if es_efe else "LC-MIRAFLORES-LOGO-3D[2].jpg"
         with Image.open(bg_p) as b:
@@ -128,7 +126,6 @@ def crear_flyer(productos, tienda_nombre, num_pag):
                 logo = ImageOps.contain(l, (425, 300))
                 flyer.paste(logo, (ANCHO-580+(500-logo.width)//2, 50), logo)
     except: pass
-
     txt_tienda = tienda_nombre.upper()
     tw_t = draw.textlength(txt_tienda, font=f_tienda)
     if es_efe:
@@ -138,29 +135,23 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         p_x = ANCHO - tw_t - 250
         draw.polygon([(p_x, 720), (p_x + 100, 520), (ANCHO, 520), (ANCHO, 720)], fill=NEGRO)
         draw.text((ANCHO - tw_t - 100, 570), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
-
     txt_gen = f"Generado: {fecha_peru} - PÁG {num_pag}"
     draw_custom_rounded(draw, [0, 850, 850, 960], 40, BLANCO, (False, True, True, False))
     draw.text((40, 880), txt_gen, font=f_fecha, fill=NEGRO)
-
     draw.rectangle([0, 1030, ANCHO, 1260], fill=color_slogan_bg)
     draw.text((ANCHO//2, 1145), "¡APROVECHA ESTAS INCREÍBLES OFERTAS!", font=f_slogan, fill=BLANCO if es_efe else NEGRO, anchor="mm")
-
     anchos, altos = [110, 1300], [1350, 2150, 2950]
     for i, prod in enumerate(productos):
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
-        
         stock_txt = limpiar_valor_puro(prod.get('Stock LM', '0'), es_precio=False)
         color_st = GRIS_MARCA if stock_txt == "-" else (EFE_AZUL if es_efe else LC_AMARILLO)
         draw.rounded_rectangle([x+30, y+30, x+300, y+160], radius=20, fill=color_st)
         draw.text((x+165, y+65), "STOCK", font=f_stock_tag, fill=BLANCO if es_efe else NEGRO, anchor="mm")
         draw.text((x+165, y+115), stock_txt, font=f_stock_val, fill=BLANCO if es_efe else NEGRO, anchor="mm")
-
         path_img = cache_memoria.get(prod.get('image_link'))
         if path_img:
             with Image.open(path_img) as img: flyer.paste(img, (x+50, y+200), img)
-
         tx, area_w = x + 600, 450
         draw.text((tx, y+80), str(prod.get('Marca', '')).upper(), font=f_marca, fill=GRIS_MARCA)
         lines = textwrap.wrap(str(prod.get('Nombre Articulo', '')), width=16)
@@ -168,12 +159,10 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         for line in lines[:3]:
             draw.text((tx, ty), line, font=f_nombre, fill=NEGRO)
             ty += 75
-
         p_final = limpiar_valor_puro(prod.get('Precio Vigente', '0'), es_precio=True)
         ty_p = y + 420
         color_p_bg = color_slogan_bg if p_final != "-" else GRIS_MARCA
         draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_p_bg, (True, True, False, False))
-        
         if p_final == "-":
             draw.text((tx + area_w//2, ty_p + 90), "-", font=f_precio, fill=BLANCO if es_efe else NEGRO, anchor="mm")
         else:
@@ -182,12 +171,10 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             curr_x = tx + (area_w - w_total) // 2
             draw.text((curr_x, ty_p + 105), t_sol, font=f_soles, fill=BLANCO if es_efe else NEGRO, anchor="ls")
             draw.text((curr_x + draw.textlength(t_sol, font=f_soles), ty_p + 115), p_final, font=f_precio, fill=BLANCO if es_efe else NEGRO, anchor="ls")
-
         sku_val = str(prod['SKU'])
         sku_c = NEGRO if not es_efe else EFE_NARANJA
         draw_custom_rounded(draw, [tx, ty_p+180, tx+area_w, ty_p+280], 25, sku_c, (False, False, True, True))
         draw.text((tx+area_w//2, ty_p+230), sku_val, font=f_sku, fill=BLANCO, anchor="mm")
-
     return flyer
 
 def gestionar_archivo_drive(service, file_path, file_name):
@@ -211,39 +198,27 @@ def procesar_tienda_batch(data, service_drive):
         prods = grupo.to_dict('records')
         paginas = []
         total_pags = (len(prods) + 5) // 6
-        
         for i in range(0, len(prods), 6):
             pag_actual = (i//6)+1
-            # Añadimos la hora actual al log para que cada línea sea única
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            print(f"   [{timestamp}] [Procesando {nombre} | Pag {pag_actual}/{total_pags}]", flush=True)
-            
+            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            print(f"   [{ts}] [Activo] {nombre} | Pág {pag_actual}/{total_pags} | Ciclo: {gc.get_count()[0]}", flush=True)
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             paginas.append(img_flyer)
-        
         if paginas:
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
-            
-            # Guardado optimizado
             paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=60, optimize=True)
-            
-            # Liberación inmediata de RAM
             for p in paginas: p.close()
             del paginas
-            
+            gc.collect()
             link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
-            print(f">> ÉXITO TOTAL: {nombre}")
-            
-            # LIBERAR DISCO: Borramos el PDF local una vez subido a Drive
+            print(f">> OK [{datetime.now().strftime('%H:%M:%S')}] -> {nombre} subido exitosamente.")
             if os.path.exists(local_path):
                 os.remove(local_path)
-            
-            gc.collect() 
             return [nombre, link_drive]
     except Exception as e: 
-        print(f"\n!!! ERROR CRÍTICO en {nombre}: {e}")
+        print(f"\n!!! ERROR CRÍTICO en {nombre} a las {datetime.now()}: {e}")
     return None
 
 # --- FLUJO ---
@@ -253,6 +228,7 @@ df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 
 df_lookup = pd.DataFrame(ss_client.worksheet("listado_productos").get_all_records())
 img_dict = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', case=False).map(img_dict).fillna('')
+
 promos = {}
 for p in ["Promo01", "Promo03", "Promo04"]:
     df_p = pd.DataFrame(ss_client.worksheet(p).get_all_records())
@@ -263,81 +239,83 @@ for p in ["Promo01", "Promo03", "Promo04"]:
 df_txl = pd.DataFrame(ss_client.worksheet("TiendasxLista").get_all_records())
 txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
-
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
-
-# --- FILTRADO POR SEMANA ---
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
-print(f">> Iniciando Semana: {semana_actual}. Productos a procesar: {len(df_final)}")
 
-# --- VOLCADO A "Detalle de Inventario" (Tu Data Maestra) ---
-try:
-    print(">> Actualizando hoja 'Detalle de Inventario' con la data maestra...")
-    ws_inventario = ss_client.worksheet("Detalle de Inventario")
-    ws_inventario.clear()
-    
-    # Preparamos los datos incluyendo los encabezados exactos que pediste
-    columnas_maestras = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
-    data_maestra = [columnas_maestras] + df_final[columnas_maestras].fillna("-").values.tolist()
-    
-    # Escritura masiva (mucho más rápido)
-    ws_inventario.update('A1', data_maestra)
-    print(">> OK: Hoja 'Detalle de Inventario' actualizada exitosamente.")
-except Exception as e:
-    print(f"!!! Advertencia: No se pudo actualizar 'Detalle de Inventario': {e}")
+# --- VOLCADO A "Detalle de Inventario" ---
+if len(sys.argv) <= 1 or sys.argv[1] == "0":
+    try:
+        # (Tu código actual de Detalle de Inventario...)
+        ws_inventario = ss_client.worksheet("Detalle de Inventario")
+        ws_inventario.clear()
+        columnas_maestras = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
+        data_maestra = [columnas_maestras] + df_final[columnas_maestras].fillna("-").values.tolist()
+        ws_inventario.update('A1', data_maestra)
+        print(">> OK: Hoja 'Detalle de Inventario' actualizada.")
 
-# Bajamos a 10 para máxima estabilidad de RAM ante 85k productos
-with ThreadPoolExecutor(max_workers=6) as exe:
-    exe.map(descargar_y_cachear, df_final['image_link'].unique())
+        # --- AGREGAR ESTO: Limpiar la hoja de links para la nueva semana ---
+        print(">> Limpiando hoja 'FLYER_TIENDA' para nuevos links...")
+        ws_links = ss_client.worksheet("FLYER_TIENDA")
+        ws_links.clear()
+        ws_links.update('A1', [["TIENDA", "LINK DRIVE"]]) 
+        
+    except Exception as e: print(f"Error Inventario/Links: {e}")
 
-# --- PROCESAMIENTO DE TIENDAS CON PROTECCIÓN Y ESCRITURA INCREMENTAL ---
+# --- REPARTO POR MATRIZ ---
+tiendas_procesadas = list(df_final.groupby('Tienda'))
+total_tiendas_global = len(tiendas_procesadas)
+
+if len(sys.argv) > 2:
+    inicio = int(sys.argv[1])
+    fin = int(sys.argv[2])
+    # Ajustamos el fin para no salir del rango
+    fin = min(fin, total_tiendas_global)
+    tiendas_a_procesar = tiendas_procesadas[inicio:fin]
+    print(f"\n>>> MÁQUINA TRABAJANDO RANGO: {inicio} a {fin} (Total en este hilo: {len(tiendas_a_procesar)})")
+else:
+    tiendas_a_procesar = tiendas_procesadas
+    print(f"\n>>> TRABAJANDO TODO EL BLOQUE: {total_tiendas_global} tiendas.")
+
+# Descargamos solo las imágenes necesarias para este rango (optimiza RAM)
+urls_rango = pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique()
+with ThreadPoolExecutor(max_workers=4) as exe:
+    exe.map(descargar_y_cachear, urls_rango)
+
 tienda_links = []
-batch_size = 5  # Cada 5 tiendas guardaremos en el Excel para no perder info
-tiendas_procesadas = df_final.groupby('Tienda')
-total_tiendas = len(tiendas_procesadas)
+batch_size = 5
 
-print(f">> Iniciando generación para {total_tiendas} tiendas.")
-
-for idx, data in enumerate(tiendas_procesadas):
+for idx, data in enumerate(tiendas_a_procesar):
     try:
         res = procesar_tienda_batch(data, drive_service)
         if res:
             tienda_links.append(res)
-            print(f"[{idx+1}/{total_tiendas}] >> Acumulados: {len(tienda_links)} links.")
+            print(f"[{idx+1}/{len(tiendas_a_procesar)}] >> Acumulados: {len(tienda_links)} links.")
             
-            # --- ESCRITURA INCREMENTAL ---
             if len(tienda_links) % batch_size == 0:
                 try:
+                    # En modo matriz, agregamos filas al final en lugar de sobreescribir A1 para no borrar lo de otros hilos
                     ws_output = ss_client.worksheet("FLYER_TIENDA")
-                    # No hacemos .clear() aquí para no borrar lo anterior, 
-                    # simplemente sobreescribimos desde A1 con todo lo acumulado
-                    cuerpo_incremental = [["TIENDA", "LINK DRIVE"]] + tienda_links
-                    ws_output.update('A1', cuerpo_incremental)
-                    print(f"!!! INFO: Backup incremental guardado en Excel ({len(tienda_links)} links).")
-                except:
-                    print("!!! Advertencia: Falló el backup incremental, pero el proceso sigue.")
-            
+                    ws_output.append_rows(tienda_links[-batch_size:]) 
+                    print("!!! INFO: Backup incremental (Matriz) guardado.")
+                    
+                    if len(tienda_links) % 15 == 0:
+                        cache_memoria.clear()
+                        gc.collect()
+                except Exception as e: print(f"Error backup: {e}")
             time.sleep(1) 
-            gc.collect()
     except Exception as e:
-        print(f"!!! Error saltado en tienda {data[0]}: {e}")
         continue 
 
-# --- ESCRITURA FINAL DEFINITIVA ---
+# Escritura final (Solo agrega lo que procesó esta máquina)
 if tienda_links:
-    print(f">> Finalizando: Escribiendo lista completa de {len(tienda_links)} tiendas...")
-    for intento in range(3):
-        try:
-            ws_output = ss_client.worksheet("FLYER_TIENDA")
-            ws_output.clear()
-            cuerpo_datos = [["TIENDA", "LINK DRIVE"]] + tienda_links
-            ws_output.update('A1', cuerpo_datos)
-            print(">> EXCEL ACTUALIZADO EXITOSAMENTE AL 100%.")
-            break
-        except Exception as e:
-            print(f"Intento {intento+1} fallido: {e}")
-            time.sleep(5)
-else:
-    print("!! No se generaron links.")
+    try:
+        ws_output = ss_client.worksheet("FLYER_TIENDA")
+        # Agregamos lo restante que no se guardó en el batch
+        sobrantes = len(tienda_links) % batch_size
+        if sobrantes > 0:
+            ws_output.append_rows(tienda_links[-sobrantes:])
+        print(f">> BLOQUE FINALIZADO CON ÉXITO: {len(tienda_links)} tiendas.")
+    except Exception as e:
+        print(f"Error en cierre de bloque: {e}")
 
-print(">> PROCESO COMPLETADO.")
+print(">> PROCESO DE ESTA MÁQUINA COMPLETADO.")

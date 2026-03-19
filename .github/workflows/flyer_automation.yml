@@ -10,7 +10,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 
+    strategy:
+      # AQUÍ ESTÁ LA MAGIA: Esto crea 5 máquinas independientes
+      matrix:
+        rango: [
+          {i: 0, f: 50}, 
+          {i: 50, f: 100}, 
+          {i: 100, f: 150}, 
+          {i: 150, f: 200}, 
+          {i: 200, f: 300}
+        ]
+      fail-fast: false # Si una máquina falla, las otras 4 NO se detienen
 
     steps:
       - name: Checkout
@@ -26,7 +36,7 @@ jobs:
         run: |
           pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
 
-      - name: Ejecutar Script de Flyers
+      - name: Ejecutar Bloque de Tiendas (${{ matrix.rango.i }} a ${{ matrix.rango.f }})
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
@@ -34,7 +44,13 @@ jobs:
           PYTHONDONTWRITEBYTECODE: 1
           PYTHONUNBUFFERED: 1 
         run: |
+          # 1. Configuraciones de red extremas
           git config --global http.postBuffer 1048576000
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
-          python -u generar_flyers.py
+          
+          # 2. Limpieza de disco inicial
+          rm -rf temp_flyers temp_cache_img
+          
+          # 3. Ejecutamos el script pasando los argumentos de la matriz
+          python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
