@@ -261,7 +261,7 @@ if len(sys.argv) <= 1 or sys.argv[1] == "0":
         
     except Exception as e: print(f"Error Inventario/Links: {e}")
 
-# --- REPARTO POR MATRIZ ---
+# --- REPARTO POR MATRIZ CON RESILIENCIA DE API ---
 tiendas_procesadas = list(df_final.groupby('Tienda'))
 total_tiendas_global = len(tiendas_procesadas)
 
@@ -269,26 +269,26 @@ if len(sys.argv) > 2:
     inicio = int(sys.argv[1])
     fin = int(sys.argv[2])
     
-    # --- SOLUCIÓN ERROR 429: ESCALONAMIENTO ---
-    # Cada máquina espera un poco para no atacar a Google Sheets al mismo tiempo
-    espera = (inicio // 50) * 20  # Máquina 50 espera 20s, Máquina 100 espera 40s...
+    # [!] SOLUCIÓN SENIOR 1: Escalonamiento de seguridad
+    # Aumentamos a 40 segundos por bloque para asegurar que Google Sheets libere la cuota
+    espera = (inicio // 50) * 40  
     if inicio > 0:
-        print(f">>> [!] ESCALONAMIENTO: Esperando {espera} segundos para evitar bloqueo de Google Sheets API...", flush=True)
+        print(f">>> [!] SEGURIDAD API: Esperando {espera} segundos para escalonar peticiones...", flush=True)
         time.sleep(espera)
     
     fin = min(fin, total_tiendas_global)
     tiendas_a_procesar = tiendas_procesadas[inicio:fin]
-    print(f"\n>>> MÁQUINA TRABAJANDO RANGO: {inicio} a {fin} (Total en este hilo: {len(tiendas_a_procesar)})")
 else:
     tiendas_a_procesar = tiendas_procesadas
-    print(f"\n>>> TRABAJANDO TODO EL BLOQUE: {total_tiendas_global} tiendas.")
 
-# --- SOLUCIÓN ERROR CONCATENACIÓN: VALIDAR SI HAY TIENDAS ---
+# [!] SOLUCIÓN SENIOR 2: Validación de rango vacío
 if not tiendas_a_procesar:
-    print(">>> [!] AVISO: No hay tiendas en este rango para procesar. Finalizando con éxito.")
-    sys.exit(0) # Salida limpia para que GitHub se ponga en VERDE
+    print(f">>> [!] AVISO: El rango {inicio}-{fin} no tiene tiendas. Finalizando con éxito.")
+    sys.exit(0)
 
-# Descargamos solo las imágenes necesarias para este rango (optimiza RAM)
+print(f"\n>>> MÁQUINA TRABAJANDO RANGO: {inicio} a {fin} (Tiendas: {len(tiendas_a_procesar)})")
+
+# [!] SOLUCIÓN SENIOR 3: Descarga de imágenes con reintentos
 urls_rango = pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique()
 with ThreadPoolExecutor(max_workers=4) as exe:
     exe.map(descargar_y_cachear, urls_rango)
@@ -297,40 +297,41 @@ tienda_links = []
 batch_size = 5
 
 for idx, data in enumerate(tiendas_a_procesar):
-    try:
-        res = procesar_tienda_batch(data, drive_service)
-        if res:
-            tienda_links.append(res)
-            print(f"[{idx+1}/{len(tiendas_a_procesar)}] >> Acumulados: {len(tienda_links)} links.")
-            
-            if len(tienda_links) % batch_size == 0:
-                try:
-                    # En modo matriz, agregamos filas al final
+    # Reintento simple por si Google Sheets falla en el camino
+    for intento in range(3):
+        try:
+            res = procesar_tienda_batch(data, drive_service)
+            if res:
+                tienda_links.append(res)
+                
+                if len(tienda_links) % batch_size == 0:
                     ws_output = ss_client.worksheet("FLYER_TIENDA")
-                    ws_output.append_rows(tienda_links[-batch_size:]) 
-                    print("!!! INFO: Backup incremental (Matriz) guardado.")
+                    ws_output.append_rows(tienda_links[-batch_size:])
+                    print(f"!!! INFO: Backup incremental OK ({len(tienda_links)} links).")
                     
                     if len(tienda_links) % 15 == 0:
                         cache_memoria.clear()
                         gc.collect()
-                except Exception as e: 
-                    print(f"Error backup incremental: {e}")
-                    time.sleep(5) # Pausa por si es un error de cuota temporal
-            
-            time.sleep(1) 
-    except Exception as e:
-        print(f"!!! Error saltado en tienda {data[0]}: {e}")
-        continue 
+            break # Si tuvo éxito, sale del bucle de reintentos
+        except Exception as e:
+            if "429" in str(e):
+                print(f"!!! ADVERTENCIA: Cuota excedida. Reintentando en 30s... (Intento {intento+1})")
+                time.sleep(30)
+            else:
+                print(f"!!! Error en tienda {data[0]}: {e}")
+                break
+    
+    time.sleep(2) # Pausa de cortesía entre tiendas
 
-# Escritura final (Solo agrega lo que procesó esta máquina)
+# Escritura final de sobrantes
 if tienda_links:
     try:
         ws_output = ss_client.worksheet("FLYER_TIENDA")
         sobrantes = len(tienda_links) % batch_size
         if sobrantes > 0:
             ws_output.append_rows(tienda_links[-sobrantes:])
-        print(f">> BLOQUE FINALIZADO CON ÉXITO: {len(tienda_links)} tiendas.")
+        print(f">> BLOQUE FINALIZADO: {len(tienda_links)} tiendas procesadas.")
     except Exception as e:
-        print(f"Error en cierre de bloque: {e}")
+        print(f"Error en cierre: {e}")
 
-print(">> PROCESO DE ESTA MÁQUINA COMPLETADO.")
+print(">> PROCESO COMPLETADO.")

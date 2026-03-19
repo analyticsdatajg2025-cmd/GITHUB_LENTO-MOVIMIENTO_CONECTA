@@ -11,17 +11,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
-      # AQUÍ ESTÁ LA MAGIA: Esto crea 5 máquinas independientes
+      # ESTRATEGIA DE MATRIZ: Crea 6 máquinas para repartir la carga de las 250+ tiendas
       matrix:
         rango: [
           {i: 0, f: 50}, 
           {i: 50, f: 100}, 
           {i: 100, f: 150}, 
           {i: 150, f: 200}, 
-          {i: 200, f: 250}, # Antes era 200-300, ahora es 200-250
+          {i: 200, f: 250},
           {i: 250, f: 300}
         ]
-      fail-fast: false # Si una máquina falla, las otras 4 NO se detienen
+      fail-fast: false # Permite que si un bloque falla, los demás completen su trabajo
 
     steps:
       - name: Checkout
@@ -37,7 +37,7 @@ jobs:
         run: |
           pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
 
-      - name: Ejecutar Bloque de Tiendas (${{ matrix.rango.i }} a ${{ matrix.rango.f }})
+      - name: Ejecutar Bloque (${{ matrix.rango.i }} - ${{ matrix.rango.f }})
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
@@ -45,13 +45,13 @@ jobs:
           PYTHONDONTWRITEBYTECODE: 1
           PYTHONUNBUFFERED: 1 
         run: |
-          # 1. Configuraciones de red extremas
+          # 1. Blindaje de red para subida de PDFs pesados
           git config --global http.postBuffer 1048576000
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
           
-          # 2. Limpieza de disco inicial
+          # 2. Limpieza de espacio en disco del Runner
           rm -rf temp_flyers temp_cache_img
           
-          # 3. Ejecutamos el script pasando los argumentos de la matriz
+          # 3. Ejecución del script con paso de argumentos (Rango)
           python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
