@@ -213,27 +213,58 @@ def procesar_tienda_batch(data, service_drive):
         prods = grupo.to_dict('records')
         paginas = []
         total_pags = (len(prods) + 5) // 6
+        
         for i in range(0, len(prods), 6):
-            pag_actual = (i//6)+1
-            ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            print(f"   [{ts}] [Activo] {nombre} | Pág {pag_actual}/{total_pags} | Ciclo: {gc.get_count()[0]}", flush=True)
+            pag_actual = (i//6) + 1
+            ts = datetime.now().strftime("%H:%M:%S")
+            
+            # [!] OPTIMIZACIÓN 1: Crear flyer y convertir a RGB de inmediato
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             paginas.append(img_flyer)
+            
+            # [!] OPTIMIZACIÓN 2: Liberar basura de memoria en cada página
+            if pag_actual % 2 == 0:
+                gc.collect()
+            
+            print(f"   [{ts}] [Pág {pag_actual}/{total_pags}] -> {nombre}", flush=True)
+
         if paginas:
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
-            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], quality=60, optimize=True)
-            for p in paginas: p.close()
+            
+            # [!] OPTIMIZACIÓN 3: Guardado con compresión inteligente (Subsampling)
+            # Esto reduce el uso de RAM durante la escritura del archivo PDF
+            paginas[0].save(
+                local_path, 
+                save_all=True, 
+                append_images=paginas[1:], 
+                quality=50,         # Calidad optimizada para lectura digital
+                optimize=True,
+                subsampling=0       # Mantiene nitidez en textos pero reduce peso en imágenes
+            )
+            
+            # [!] OPTIMIZACIÓN 4: Cierre agresivo de objetos PIL
+            for p in paginas:
+                p.close()
             del paginas
             gc.collect()
+            
             link_drive = gestionar_archivo_drive(service_drive, local_path, fn)
-            print(f">> OK [{datetime.now().strftime('%H:%M:%S')}] -> {nombre} subido exitosamente.")
+            print(f">> OK [{datetime.now().strftime('%H:%M:%S')}] -> {nombre} subido.")
+            
             if os.path.exists(local_path):
                 os.remove(local_path)
+            
             return [nombre, link_drive]
+            
     except Exception as e: 
-        print(f"\n!!! ERROR CRÍTICO en {nombre} a las {datetime.now()}: {e}")
+        print(f"\n!!! ERROR CRÍTICO en {nombre}: {e}")
+        # Limpieza de emergencia en caso de error
+        if 'paginas' in locals():
+            for p in paginas: p.close()
+            del paginas
+        gc.collect()
     return None
 
 # --- FLUJO ---
