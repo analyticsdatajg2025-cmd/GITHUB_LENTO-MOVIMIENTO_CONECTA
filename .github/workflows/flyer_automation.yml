@@ -14,13 +14,9 @@ jobs:
     strategy:
       matrix:
         rango: [
-          {i: 0, f: 45},   # Reducimos un poco el tamaño de los bloques (de 50 a 45)
-          {i: 45, f: 90},  # para que la RAM vaya más holgada
-          {i: 90, f: 135}, 
-          {i: 135, f: 180}, 
-          {i: 180, f: 225}, 
-          {i: 225, f: 270},
-          {i: 270, f: 315}
+          {i: 0, f: 25}, {i: 25, f: 50}, {i: 50, f: 75}, {i: 75, f: 100},
+          {i: 100, f: 125}, {i: 125, f: 150}, {i: 150, f: 175}, {i: 175, f: 200},
+          {i: 200, f: 225}, {i: 225, f: 250}, {i: 250, f: 275}, {i: 275, f: 315}
         ]
       fail-fast: false
 

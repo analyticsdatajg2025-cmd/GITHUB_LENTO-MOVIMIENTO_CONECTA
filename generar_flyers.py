@@ -321,37 +321,42 @@ tienda_links = []
 batch_size = 5
 
 for idx, data in enumerate(tiendas_a_procesar):
-    # Reintento simple por si Google Sheets falla en el camino
-    for intento in range(3):
-        try:
-            res = procesar_tienda_batch(data, drive_service)
-            if res:
-                tienda_links.append(res)
+    # --- SEGURO NIVEL 1: Si la tienda entera colapsa, pasamos a la siguiente ---
+    try:
+        # Reintento por si Google Sheets falla en el camino (429)
+        for intento in range(3):
+            try:
+                res = procesar_tienda_batch(data, drive_service)
+                if res:
+                    tienda_links.append(res)
+                    
+                    if len(tienda_links) % batch_size == 0:
+                        ws_output = ss_client.worksheet("FLYER_TIENDA")
+                        ws_output.append_rows(tienda_links[-batch_size:])
+                        print(f"!!! INFO: Backup incremental OK ({len(tienda_links)} links).")
                 
-                if len(tienda_links) % batch_size == 0:
-                    ws_output = ss_client.worksheet("FLYER_TIENDA")
-                    ws_output.append_rows(tienda_links[-batch_size:])
-                    print(f"!!! INFO: Backup incremental OK ({len(tienda_links)} links).")
-            
-            # [!] MEJORA SENIOR: Limpieza agresiva de RAM
-            # Limpiamos el cache de imágenes y forzamos al sistema a soltar RAM 
-            # inmediatamente después de CADA tienda procesada.
-            cache_memoria.clear()
-            gc.collect()
-            
-            break # Si tuvo éxito, sale del bucle de reintentos
-            
-        except Exception as e:
-            if "429" in str(e):
-                print(f"!!! ADVERTENCIA: Cuota excedida. Reintentando en 30s... (Intento {intento+1})")
-                time.sleep(30)
-            else:
-                print(f"!!! Error en tienda {data[0]}: {e}")
-                # [!] Limpieza incluso en caso de error para no arrastrar basura
-                gc.collect() 
-                break
-    
-    time.sleep(1.5) # Pausa de cortesía reducida (ya estamos protegidos por escalonamiento)
+                # --- LIMPIEZA TOTAL POST-TIENDA ---
+                cache_memoria.clear()
+                gc.collect()
+                break # Éxito, salimos de los reintentos
+
+            except Exception as e:
+                if "429" in str(e):
+                    print(f"!!! ADVERTENCIA: Cuota excedida. Reintentando en 35s... (Intento {intento+1})")
+                    time.sleep(35)
+                else:
+                    # Si el error no es de cuota, es algo en la tienda. Saltamos reintento.
+                    print(f"!!! Error interno en {data[0]}: {e}")
+                    gc.collect()
+                    break
+        
+        time.sleep(1) # Pausa mínima para no saturar
+
+    except Exception as e:
+        # Si algo muy grave pasa con una tienda, el script NO se detiene
+        print(f"!!! [!] ERROR CRÍTICO SALTADO EN TIENDA {data[0]}: {e}")
+        gc.collect()
+        continue
 
 # Escritura final de sobrantes
 if tienda_links:
