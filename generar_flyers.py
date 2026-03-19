@@ -218,13 +218,12 @@ def procesar_tienda_batch(data, service_drive):
             pag_actual = (i//6) + 1
             ts = datetime.now().strftime("%H:%M:%S")
             
-            # [!] OPTIMIZACIÓN 1: Crear flyer y convertir a RGB de inmediato
+            # [!] OPTIMIZACIÓN 1: Generar flyer
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             paginas.append(img_flyer)
             
-            # [!] OPTIMIZACIÓN 2: Liberar basura de memoria en cada página
-            if pag_actual % 2 == 0:
-                gc.collect()
+            # [!] OPTIMIZACIÓN 2: Limpieza proactiva cada página
+            gc.collect() 
             
             print(f"   [{ts}] [Pág {pag_actual}/{total_pags}] -> {nombre}", flush=True)
 
@@ -233,18 +232,22 @@ def procesar_tienda_batch(data, service_drive):
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
             
-            # [!] OPTIMIZACIÓN 3: Guardado con compresión inteligente (Subsampling)
-            # Esto reduce el uso de RAM durante la escritura del archivo PDF
+            # [!] CAMBIO CLAVE: Forzar liberación de RAM ANTES del guardado pesado
+            gc.collect() 
+
+            # [!] OPTIMIZACIÓN 3: Parámetros de guardado de "Bajo Estrés"
+            # Bajamos calidad a 45 y activamos progressive para no saturar el buffer de escritura
             paginas[0].save(
                 local_path, 
                 save_all=True, 
                 append_images=paginas[1:], 
-                quality=50,         # Calidad optimizada para lectura digital
+                quality=45,         # Ajuste fino para reducir peso en RAM
                 optimize=True,
-                subsampling=0       # Mantiene nitidez en textos pero reduce peso en imágenes
+                progressive=True,   # Ayuda a que la escritura sea más lineal
+                subsampling=0       
             )
             
-            # [!] OPTIMIZACIÓN 4: Cierre agresivo de objetos PIL
+            # [!] OPTIMIZACIÓN 4: Cierre inmediato de punteros de imagen
             for p in paginas:
                 p.close()
             del paginas
@@ -260,7 +263,6 @@ def procesar_tienda_batch(data, service_drive):
             
     except Exception as e: 
         print(f"\n!!! ERROR CRÍTICO en {nombre}: {e}")
-        # Limpieza de emergencia en caso de error
         if 'paginas' in locals():
             for p in paginas: p.close()
             del paginas
