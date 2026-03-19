@@ -18,7 +18,8 @@ jobs:
           {i: 50, f: 100}, 
           {i: 100, f: 150}, 
           {i: 150, f: 200}, 
-          {i: 200, f: 300}
+          {i: 200, f: 250}, # Antes era 200-300, ahora es 200-250
+          {i: 250, f: 300}
         ]
       fail-fast: false # Si una máquina falla, las otras 4 NO se detienen
 
