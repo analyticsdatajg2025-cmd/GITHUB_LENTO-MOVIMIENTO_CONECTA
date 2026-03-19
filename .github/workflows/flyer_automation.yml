@@ -17,9 +17,9 @@ jobs:
           {i: 0, f: 25}, {i: 25, f: 50}, {i: 50, f: 75}, {i: 75, f: 100},
           {i: 100, f: 125}, {i: 125, f: 150}, {i: 150, f: 175}, {i: 175, f: 200},
           {i: 200, f: 220}, {i: 220, f: 240}, 
-          {i: 240, f: 250}, # <--- Bloque ultra ligero
-          {i: 250, f: 260}, # <--- Bloque ultra ligero
-          {i: 260, f: 285}, {i: 285, f: 315}
+          {i: 240, f: 245}, # Fragmentación extrema para seguridad
+          {i: 245, f: 250}, # Fragmentación extrema para seguridad
+          {i: 250, f: 275}, {i: 275, f: 315}
         ]
       fail-fast: false
 

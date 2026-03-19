@@ -241,10 +241,10 @@ def procesar_tienda_batch(data, service_drive):
                 local_path, 
                 save_all=True, 
                 append_images=paginas[1:], 
-                quality=45,         # Ajuste fino para reducir peso en RAM
+                quality=40,       
                 optimize=True,
-                progressive=True,   # Ayuda a que la escritura sea más lineal
-                subsampling=0       
+                progressive=True,   
+                subsampling=2       
             )
             
             # [!] OPTIMIZACIÓN 4: Cierre inmediato de punteros de imagen
