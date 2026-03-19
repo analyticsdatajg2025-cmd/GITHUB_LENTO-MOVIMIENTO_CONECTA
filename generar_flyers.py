@@ -64,6 +64,21 @@ def conectar_servicios():
     service_drive = build('drive', 'v3', credentials=creds_drive)
     return client_sheets, service_drive
 
+# [!] NUEVA FUNCIÓN SENIOR: Lectura con Reintento Automático
+def lectura_segura(client, nombre_hoja):
+    """Lee una hoja de Google Sheets con reintentos si hay error de cuota 429"""
+    for intento in range(3):
+        try:
+            return pd.DataFrame(client.worksheet(nombre_hoja).get_all_records())
+        except Exception as e:
+            if "429" in str(e):
+                espera = 30 * (intento + 1)
+                print(f"!!! [!] CUOTA EXCEDIDA en '{nombre_hoja}'. Reintentando en {espera}s... (Intento {intento+1}/3)")
+                time.sleep(espera)
+            else:
+                raise e
+    raise Exception(f"No se pudo leer la hoja '{nombre_hoja}' tras 3 intentos.")
+
 def normalizar_nombre_tienda(nombre):
     s = str(nombre).upper().replace(" ", "").replace("-", "")
     if s.endswith("EFE"): s = "EFE" + s[:-3]
@@ -223,20 +238,32 @@ def procesar_tienda_batch(data, service_drive):
 
 # --- FLUJO ---
 ss_client, drive_service = conectar_servicios()
-df_raw = pd.DataFrame(ss_client.worksheet("Origen Tdas").get_all_records())
+# [!] Escalonamiento preventivo antes de cualquier lectura
+if len(sys.argv) > 2:
+    inicio_rango = int(sys.argv[1])
+    # Aumentamos a 50 segundos para dar máximo margen
+    espera_inicial = (inicio_rango // 50) * 50 
+    if inicio_rango > 0:
+        print(f">>> [!] SEGURIDAD API: Esperando {espera_inicial}s antes de empezar...", flush=True)
+        time.sleep(espera_inicial)
+        
+# Lecturas maestras con protección de reintento
+df_raw = lectura_segura(ss_client, "Origen Tdas")
 df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3], 'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7], 'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]})
-df_lookup = pd.DataFrame(ss_client.worksheet("listado_productos").get_all_records())
+
+df_lookup = lectura_segura(ss_client, "listado_productos")
 img_dict = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', case=False).map(img_dict).fillna('')
 
 promos = {}
 for p in ["Promo01", "Promo03", "Promo04"]:
-    df_p = pd.DataFrame(ss_client.worksheet(p).get_all_records())
+    df_p = lectura_segura(ss_client, p)
     df_p.columns = df_p.columns.str.strip()
     df_p['K'] = df_p['Lista Precios'].astype(str).str.replace(".0","") + "_" + df_p['SKU'].astype(str)
     promos.update(df_p.set_index('K')['Precio Vigente'].to_dict())
 
-df_txl = pd.DataFrame(ss_client.worksheet("TiendasxLista").get_all_records())
+df_txl = lectura_segura(ss_client, "TiendasxLista")
+
 txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
@@ -245,21 +272,18 @@ df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 # --- VOLCADO A "Detalle de Inventario" ---
 if len(sys.argv) <= 1 or sys.argv[1] == "0":
     try:
-        # (Tu código actual de Detalle de Inventario...)
+        print(">> Actualizando hojas maestras...")
         ws_inventario = ss_client.worksheet("Detalle de Inventario")
         ws_inventario.clear()
         columnas_maestras = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
         data_maestra = [columnas_maestras] + df_final[columnas_maestras].fillna("-").values.tolist()
         ws_inventario.update('A1', data_maestra)
-        print(">> OK: Hoja 'Detalle de Inventario' actualizada.")
 
-        # --- AGREGAR ESTO: Limpiar la hoja de links para la nueva semana ---
-        print(">> Limpiando hoja 'FLYER_TIENDA' para nuevos links...")
         ws_links = ss_client.worksheet("FLYER_TIENDA")
         ws_links.clear()
         ws_links.update('A1', [["TIENDA", "LINK DRIVE"]]) 
-        
-    except Exception as e: print(f"Error Inventario/Links: {e}")
+        print(">> OK: Hojas inicializadas.")
+    except Exception as e: print(f"Error inicialización: {e}")
 
 # --- REPARTO POR MATRIZ CON RESILIENCIA DE API ---
 tiendas_procesadas = list(df_final.groupby('Tienda'))

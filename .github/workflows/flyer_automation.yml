@@ -10,8 +10,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # [!] MEJORA SENIOR: Limita el tiempo de vida de cada máquina a 60 min. 
+    # Si algo falla, GitHub la matará automáticamente para no gastar recursos.
+    timeout-minutes: 60 
+    
     strategy:
-      # ESTRATEGIA DE MATRIZ: Crea 6 máquinas para repartir la carga de las 250+ tiendas
       matrix:
         rango: [
           {i: 0, f: 50}, 
@@ -21,7 +24,7 @@ jobs:
           {i: 200, f: 250},
           {i: 250, f: 300}
         ]
-      fail-fast: false # Permite que si un bloque falla, los demás completen su trabajo
+      fail-fast: false
 
     steps:
       - name: Checkout
@@ -53,5 +56,5 @@ jobs:
           # 2. Limpieza de espacio en disco del Runner
           rm -rf temp_flyers temp_cache_img
           
-          # 3. Ejecución del script con paso de argumentos (Rango)
+          # 3. Ejecución del script con el nuevo escalonamiento interno del .py
           python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
