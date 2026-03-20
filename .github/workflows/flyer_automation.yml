@@ -45,12 +45,19 @@ jobs:
           PYTHONDONTWRITEBYTECODE: 1
           PYTHONUNBUFFERED: 1 
         run: |
-          # 1. Blindaje de red para subida de PDFs pesados
+          # [!] SOLUCIÓN AL ERROR 429: Escalonamiento de arranque
+          # Cada bloque espera un tiempo proporcional a su posición en la matriz
+          # La máquina (0-25) espera 0s, la (25-50) espera 45s, la (50-75) espera 90s...
+          ESPERA=$(( (${{ matrix.rango.i }} / 25) * 45 ))
+          echo ">>> [!] SEGURIDAD API: Esperando $ESPERA segundos para no saturar Google Sheets..."
+          sleep $ESPERA
+          
+          # 1. Blindaje de red
           git config --global http.postBuffer 1048576000
           
-          # 2. Limpieza radical antes de empezar
+          # 2. Limpieza de carpetas
           rm -rf temp_flyers temp_cache_img
           mkdir -p temp_flyers temp_cache_img
           
-          # 3. Ejecución con salida en tiempo real
+          # 3. Ejecución del script
           python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}

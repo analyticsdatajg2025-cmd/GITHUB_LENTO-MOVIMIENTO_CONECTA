@@ -27,7 +27,6 @@ cache_dir = "temp_cache_img"
 os.makedirs(output_dir, exist_ok=True)
 os.makedirs(cache_dir, exist_ok=True)
 
-# Semana actual se mantiene global
 ahora_global = datetime.utcnow() - timedelta(hours=5)
 semana_actual = f"Sem{ahora_global.isocalendar()[1]}"
 
@@ -65,16 +64,16 @@ def conectar_servicios():
     return client_sheets, service_drive
 
 def lectura_segura(client, nombre_hoja):
-    for intento in range(3):
+    for intento in range(5):
         try:
             return pd.DataFrame(client.worksheet(nombre_hoja).get_all_records())
         except Exception as e:
             if "429" in str(e):
-                espera = 35 * (intento + 1)
-                print(f"!!! CUOTA EXCEDIDA. Reintentando en {espera}s...")
+                espera = 60 * (intento + 1) 
+                print(f"!!! CUOTA EXCEDIDA en {nombre_hoja}. Esperando {espera}s...")
                 time.sleep(espera)
             else: raise e
-    raise Exception(f"Fallo lectura {nombre_hoja}")
+    raise Exception(f"Fallo lectura tras 5 intentos en {nombre_hoja}")
 
 def normalizar_nombre_tienda(nombre):
     s = str(nombre).upper().replace(" ", "").replace("-", "")
@@ -92,7 +91,7 @@ def descargar_y_cachear(url):
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         with Image.open(BytesIO(res.content)) as img:
             img = img.convert("RGBA")
-            img.thumbnail((550, 550)) # Tamaño óptimo para no pixelar
+            img.thumbnail((550, 550))
             img.save(fname, "PNG")
         cache_memoria[url] = fname
     except: cache_memoria[url] = None
@@ -113,7 +112,6 @@ def limpiar_valor_puro(valor, es_precio=True):
     return s
 
 def crear_flyer(productos, tienda_nombre, num_pag):
-    # [!] CORRECCIÓN FECHA: Dinámica por cada página
     ahora = datetime.utcnow() - timedelta(hours=5)
     fecha_hoy = ahora.strftime("%d/%m/%Y %I:%M %p")
     
@@ -161,14 +159,11 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         x, y = anchos[i%2], altos[i//2]
         draw.rounded_rectangle([x, y, x+1090, y+760], radius=70, fill=BLANCO)
         
-        # [!] IMAGEN PRODUCTO (Corregido para no desaparecer)
         path_img = cache_memoria.get(prod.get('image_link'))
         if path_img and os.path.exists(path_img):
             with Image.open(path_img) as img:
-                img_w, img_h = img.size
                 flyer.paste(img.convert("RGBA"), (x+50, y+200), img.convert("RGBA"))
 
-        # Stock
         stock_txt = limpiar_valor_puro(prod.get('Stock LM', '0'), es_precio=False)
         color_st = GRIS_MARCA if stock_txt == "-" else (EFE_AZUL if es_efe else LC_AMARILLO)
         draw.rounded_rectangle([x+30, y+30, x+300, y+160], radius=20, fill=color_st)
@@ -227,22 +222,18 @@ def procesar_tienda_batch(data, service_drive):
             pag_actual = (i//6) + 1
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             paginas.append(img_flyer)
-            gc.collect() # Limpieza por página
+            gc.collect()
 
         if paginas:
             clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
             fn = f"LENTO_{clean}.pdf"
             local_path = os.path.join(output_dir, fn)
-            
-            # [!] OPTIMIZACIÓN CRÍTICA PARA BLOQUE 240 (Subsampling y Calidad)
             gc.collect() 
             paginas[0].save(local_path, save_all=True, append_images=paginas[1:], 
                             quality=35, optimize=True, progressive=True, subsampling=2)
-            
             for p in paginas: p.close()
             del paginas
             gc.collect()
-            
             link = gestionar_archivo_drive(service_drive, local_path, fn)
             if os.path.exists(local_path): os.remove(local_path)
             return [nombre, link]
@@ -252,10 +243,13 @@ def procesar_tienda_batch(data, service_drive):
 # --- FLUJO PRINCIPAL ---
 ss_client, drive_service = conectar_servicios()
 
-# Carga de datos
+# [!] REGLA DE ORO: Escalonamiento inicial ANTES de cargar datos pesados
+inicio = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+fin = int(sys.argv[2]) if len(sys.argv) > 2 else 999
+time.sleep((inicio // 25) * 45) # Escalonamiento para no saturar Google
+
 df_raw = lectura_segura(ss_client, "Origen Tdas")
 df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3], 'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7], 'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]})
-
 df_lookup = lectura_segura(ss_client, "listado_productos")
 img_dict = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', case=False).map(img_dict).fillna('')
@@ -272,37 +266,40 @@ df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 
-# Reparto por matriz
-tiendas_procesadas = list(df_final.groupby('Tienda'))
-if len(sys.argv) > 2:
-    inicio, fin = int(sys.argv[1]), int(sys.argv[2])
-    # Escalonamiento de API
-    time.sleep((inicio // 25) * 30)
-    tiendas_a_procesar = tiendas_procesadas[inicio:min(fin, len(tiendas_procesadas))]
-else: tiendas_a_procesar = tiendas_procesadas
+# [!] ACTUALIZACIÓN DE HOJA MAESTRA (Solo la primera máquina)
+if inicio == 0:
+    try:
+        print(">> Actualizando hoja maestra 'Detalle de Inventario'...")
+        ws_inv = ss_client.worksheet("Detalle de Inventario")
+        ws_inv.clear()
+        columnas = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
+        data_inv = [columnas] + df_final[columnas].fillna("-").values.tolist()
+        ws_inv.update('A1', data_inv)
+        # Limpiar también la hoja de links
+        ss_client.worksheet("FLYER_TIENDA").clear()
+        ss_client.worksheet("FLYER_TIENDA").update('A1', [["TIENDA", "LINK DRIVE"]])
+    except Exception as e: print(f"Error actualizando maestra: {e}")
 
-# Descarga previa (Solo una vez por máquina)
+tiendas_procesadas = list(df_final.groupby('Tienda'))
+tiendas_a_procesar = tiendas_procesadas[inicio:min(fin, len(tiendas_procesadas))]
+
 urls = pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique()
 with ThreadPoolExecutor(max_workers=5) as exe:
     exe.map(descargar_y_cachear, urls)
 
 tienda_links = []
-batch_size = 2 # Escribir muy seguido para no perder nada
+batch_size = 2 
 
 for idx, data in enumerate(tiendas_a_procesar):
     try:
         res = procesar_tienda_batch(data, drive_service)
         if res:
             tienda_links.append(res)
-            # Escritura inmediata al Excel
             if len(tienda_links) % batch_size == 0:
-                ws_output = ss_client.worksheet("FLYER_TIENDA")
-                ws_output.append_rows(tienda_links[-batch_size:])
-        gc.collect() # [!] CLAVE: No borramos cache_memoria
-    except Exception as e:
-        print(f"Saltando tienda por error crítico: {e}")
+                ss_client.worksheet("FLYER_TIENDA").append_rows(tienda_links[-batch_size:])
+        gc.collect() 
+    except Exception as e: print(f"Error crítico en tienda: {e}")
 
-# Escritura de sobrantes finales
 if tienda_links:
     ws_output = ss_client.worksheet("FLYER_TIENDA")
     sobrantes = len(tienda_links) % batch_size
