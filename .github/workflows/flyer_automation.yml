@@ -10,18 +10,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90 # Subimos de 60 a 90 para dar margen de maniobra
+    timeout-minutes: 90
     strategy:
       matrix:
         rango: [
           {i: 0, f: 25}, {i: 25, f: 50}, {i: 50, f: 75}, {i: 75, f: 100},
           {i: 100, f: 125}, {i: 125, f: 150}, {i: 150, f: 175}, {i: 175, f: 200},
           {i: 200, f: 220}, {i: 220, f: 240}, 
-          {i: 240, f: 245}, # Fragmentación extrema para seguridad
-          {i: 245, f: 250}, # Fragmentación extrema para seguridad
+          {i: 240, f: 245}, # [!] ZONA CRÍTICA: Mantenemos fragmentación de 5
+          {i: 245, f: 250}, # [!] ZONA CRÍTICA: Mantenemos fragmentación de 5
           {i: 250, f: 275}, {i: 275, f: 315}
         ]
-      fail-fast: false
+      fail-fast: false # [!] CLAVE: Si una falla, las demás NO se detienen
 
     steps:
       - name: Checkout
@@ -47,11 +47,10 @@ jobs:
         run: |
           # 1. Blindaje de red para subida de PDFs pesados
           git config --global http.postBuffer 1048576000
-          git config --global http.lowSpeedLimit 0
-          git config --global http.lowSpeedTime 999999
           
-          # 2. Limpieza de espacio en disco del Runner
+          # 2. Limpieza radical antes de empezar
           rm -rf temp_flyers temp_cache_img
+          mkdir -p temp_flyers temp_cache_img
           
-          # 3. Ejecución del script con el nuevo escalonamiento interno del .py
+          # 3. Ejecución con salida en tiempo real
           python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
