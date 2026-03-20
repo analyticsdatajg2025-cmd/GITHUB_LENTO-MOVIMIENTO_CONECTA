@@ -281,29 +281,67 @@ if inicio == 0:
     except Exception as e: print(f"Error actualizando maestra: {e}")
 
 tiendas_procesadas = list(df_final.groupby('Tienda'))
-tiendas_a_procesar = tiendas_procesadas[inicio:min(fin, len(tiendas_procesadas))]
+total_reales = len(tiendas_procesadas)
 
-urls = pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique()
-with ThreadPoolExecutor(max_workers=5) as exe:
-    exe.map(descargar_y_cachear, urls)
+if len(sys.argv) > 2:
+    inicio, fin = int(sys.argv[1]), int(sys.argv[2])
+    # Validación Senior: Si el inicio es mayor al total, cerramos con éxito
+    if inicio >= total_reales:
+        print(f">>> [!] AVISO: El inicio {inicio} supera el total de tiendas ({total_reales}). Nada que hacer.")
+        sys.exit(0)
+    
+    fin = min(fin, total_reales)
+    tiendas_a_procesar = tiendas_procesadas[inicio:fin]
+else:
+    tiendas_a_procesar = tiendas_procesadas
+
+# [!] SEGURO: Si no hay tiendas en este rango específico, salimos limpiamente
+if not tiendas_a_procesar:
+    print(">>> [!] Rango vacío para esta máquina. Finalizando...")
+    sys.exit(0)
+
+# Descarga previa (Blindada contra lista vacía)
+try:
+    urls = pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique()
+    with ThreadPoolExecutor(max_workers=5) as exe:
+        exe.map(descargar_y_cachear, urls)
+except Exception as e:
+    print(f">>> Error preparando imágenes: {e}")
 
 tienda_links = []
 batch_size = 2 
 
 for idx, data in enumerate(tiendas_a_procesar):
-    try:
-        res = procesar_tienda_batch(data, drive_service)
-        if res:
-            tienda_links.append(res)
-            if len(tienda_links) % batch_size == 0:
-                ss_client.worksheet("FLYER_TIENDA").append_rows(tienda_links[-batch_size:])
-        gc.collect() 
-    except Exception as e: print(f"Error crítico en tienda: {e}")
+    # Reintento de conexión por si el token parpadea (invalid_grant)
+    for intento_auth in range(2):
+        try:
+            res = procesar_tienda_batch(data, drive_service)
+            if res:
+                tienda_links.append(res)
+                if len(tienda_links) % batch_size == 0:
+                    ss_client.worksheet("FLYER_TIENDA").append_rows(tienda_links[-batch_size:])
+            break # Éxito en la tienda
+        except Exception as e:
+            if "invalid_grant" in str(e) and intento_auth == 0:
+                print("!!! Re-conectando servicios por token expirado...")
+                ss_client, drive_service = conectar_servicios() # Intenta re-conectar
+                continue
+            print(f"Error crítico en tienda {data[0]}: {e}")
+            break
+    gc.collect() 
 
+# --- SECCIÓN FINAL CORREGIDA PARA ESCRITURA TOTAL ---
 if tienda_links:
-    ws_output = ss_client.worksheet("FLYER_TIENDA")
-    sobrantes = len(tienda_links) % batch_size
-    if sobrantes > 0: ws_output.append_rows(tienda_links[-sobrantes:])
-    elif len(tienda_links) < batch_size: ws_output.append_rows(tienda_links)
+    try:
+        ws_output = ss_client.worksheet("FLYER_TIENDA")
+        # Calculamos cuántos faltan por escribir que no entraron en los lotes de 2
+        ya_escritos = (len(tienda_links) // batch_size) * batch_size
+        pendientes = tienda_links[ya_escritos:]
+        
+        if pendientes:
+            print(f">> Escribiendo últimos {len(pendientes)} links pendientes...")
+            ws_output.append_rows(pendientes)
+    except Exception as e: 
+        print(f"!!! Error en escritura final: {e}")
 
-print(">> PROCESO COMPLETADO.")
+print(">> PROCESO COMPLETADO CON ÉXITO.")

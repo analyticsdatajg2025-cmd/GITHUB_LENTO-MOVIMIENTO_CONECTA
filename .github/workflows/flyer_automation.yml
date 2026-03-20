@@ -17,9 +17,8 @@ jobs:
           {i: 0, f: 25}, {i: 25, f: 50}, {i: 50, f: 75}, {i: 75, f: 100},
           {i: 100, f: 125}, {i: 125, f: 150}, {i: 150, f: 175}, {i: 175, f: 200},
           {i: 200, f: 220}, {i: 220, f: 240}, 
-          {i: 240, f: 245}, # [!] ZONA CRÍTICA: Mantenemos fragmentación de 5
-          {i: 245, f: 250}, # [!] ZONA CRÍTICA: Mantenemos fragmentación de 5
-          {i: 250, f: 275}, {i: 275, f: 315}
+          {i: 240, f: 245}, 
+          {i: 245, f: 255}
         ]
       fail-fast: false # [!] CLAVE: Si una falla, las demás NO se detienen
 
