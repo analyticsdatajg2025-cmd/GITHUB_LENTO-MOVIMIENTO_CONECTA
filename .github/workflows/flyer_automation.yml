@@ -44,19 +44,25 @@ jobs:
           PYTHONDONTWRITEBYTECODE: 1
           PYTHONUNBUFFERED: 1 
         run: |
-          # [!] SOLUCIÓN AL ERROR 429: Escalonamiento de arranque
-          # Cada bloque espera un tiempo proporcional a su posición en la matriz
-          # La máquina (0-25) espera 0s, la (25-50) espera 45s, la (50-75) espera 90s...
-          ESPERA=$(( (${{ matrix.rango.i }} / 25) * 45 ))
-          echo ">>> [!] SEGURIDAD API: Esperando $ESPERA segundos para no saturar Google Sheets..."
-          sleep $ESPERA
+          # [!] NUEVA ESPERA DINÁMICA: Mensajes cada 60s para evitar cancelación de GitHub
+          TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 30 ))
+          echo ">>> [!] SEGURIDAD API: Espera total programada: $TOTAL_ESPERA segundos."
           
-          # 1. Blindaje de red
+          CONTADOR=0
+          while [ $CONTADOR -lt $TOTAL_ESPERA ]; do
+            RESTANTE=$((TOTAL_ESPERA - CONTADOR))
+            echo ">>> [STAY ALIVE] Faltan $RESTANTE segundos para iniciar el bloque..."
+            sleep 60
+            CONTADOR=$((CONTADOR + 60))
+          done
+          
+          # 1. Blindaje de red y subida masiva
           git config --global http.postBuffer 1048576000
+          git config --global core.compression 0
           
           # 2. Limpieza de carpetas
           rm -rf temp_flyers temp_cache_img
           mkdir -p temp_flyers temp_cache_img
           
-          # 3. Ejecución del script
+          # 3. Ejecución con modo Verbose para monitoreo constante
           python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}

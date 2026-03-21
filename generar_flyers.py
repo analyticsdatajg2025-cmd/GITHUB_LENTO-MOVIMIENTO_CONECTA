@@ -100,10 +100,18 @@ def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)
     x0, y0, x1, y1 = xy
     draw.rectangle([x0 + radius, y0, x1 - radius, y1], fill=fill)
     draw.rectangle([x0, y0 + radius, x1, y1 - radius], fill=fill)
+    # Solo dibuja el redondeado si la esquina NO está pegada al borde
     if corners[0]: draw.pieslice([x0, y0, x0 + radius * 2, y0 + radius * 2], 180, 270, fill=fill)
+    else: draw.rectangle([x0, y0, x0 + radius, y0 + radius], fill=fill) # Esquina recta
+    
     if corners[1]: draw.pieslice([x1 - radius * 2, y0, x1, y0 + radius * 2], 270, 360, fill=fill)
+    else: draw.rectangle([x1 - radius, y0, x1, y0 + radius], fill=fill)
+    
     if corners[2]: draw.pieslice([x1 - radius * 2, y1 - radius * 2, x1, y1], 0, 90, fill=fill)
+    else: draw.rectangle([x1 - radius, y1 - radius, x1, y1], fill=fill)
+    
     if corners[3]: draw.pieslice([x0, y1 - radius * 2, x0 + radius * 2, y1], 90, 180, fill=fill)
+    else: draw.rectangle([x0, y1 - radius, x0 + radius, y1], fill=fill)
 
 def limpiar_valor_puro(valor, es_precio=True):
     s = str(valor).strip().replace(" ", "")
@@ -132,6 +140,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
                 logo = ImageOps.contain(l, (390, 390))
                 flyer.paste(logo, (ANCHO-540+(460-logo.width)//2, 40+(460-logo.height)//2), logo)
             else:
+                # CORRECCIÓN LOGO LC: Esquinas superiores rectas (False, False) para evitar cuadraditos
                 draw_custom_rounded(draw, [ANCHO-580, 0, ANCHO-80, 380], 50, BLANCO, (False, False, True, True))
                 logo = ImageOps.contain(l, (425, 300))
                 flyer.paste(logo, (ANCHO-580+(500-logo.width)//2, 50), logo)
@@ -140,6 +149,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
     txt_tienda = tienda_nombre.upper()
     tw_t = draw.textlength(txt_tienda, font=f_tienda)
     if es_efe:
+        # CORRECCIÓN TIENDA EFE: Esquinas derechas rectas (False, False) para pegar al borde
         draw_custom_rounded(draw, [ANCHO - tw_t - 150, 620, ANCHO, 800], 50, EFE_NARANJA, (True, False, False, True))
         draw.text((ANCHO - tw_t - 80, 655), txt_tienda, font=f_tienda, fill=BLANCO)
     else:
@@ -147,6 +157,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         draw.polygon([(p_x, 720), (p_x + 100, 520), (ANCHO, 520), (ANCHO, 720)], fill=NEGRO)
         draw.text((ANCHO - tw_t - 100, 570), txt_tienda, font=f_tienda, fill=LC_AMARILLO)
 
+    # CORRECCIÓN FECHA: X=0 y esquina izquierda recta (False) para que pegue al borde del flyer
     txt_gen = f"Generado: {fecha_hoy} - PÁG {num_pag}"
     draw_custom_rounded(draw, [0, 850, 850, 960], 40, BLANCO, (False, True, True, False))
     draw.text((40, 880), txt_gen, font=f_fecha, fill=NEGRO)
@@ -178,9 +189,17 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             draw.text((tx, ty), line, font=f_nombre, fill=NEGRO)
             ty += 75
 
+        # CORRECCIÓN PRECIO: Si es "-" o "SIN PRECIO", se pone gris y muestra "-"
         p_final = limpiar_valor_puro(prod.get('Precio Vigente', '0'), es_precio=True)
         ty_p = y + 420
-        color_p_bg = color_slogan_bg if p_final != "-" else GRIS_MARCA
+        
+        if p_final == "-" or p_final == "SIN PRECIO":
+            p_final = "-"
+            color_p_bg = GRIS_MARCA
+        else:
+            color_p_bg = color_slogan_bg
+            
+        # CORRECCIÓN CONTENEDOR PRECIO: Esquinas inferiores rectas (False, False) para unir con SKU
         draw_custom_rounded(draw, [tx, ty_p, tx + area_w, ty_p + 180], 25, color_p_bg, (True, True, False, False))
         
         if p_final == "-":
@@ -194,6 +213,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         
         sku_val = str(prod['SKU'])
         sku_c = NEGRO if not es_efe else EFE_NARANJA
+        # CORRECCIÓN CONTENEDOR SKU: Esquinas superiores rectas (False, False) para unir con PRECIO
         draw_custom_rounded(draw, [tx, ty_p+180, tx+area_w, ty_p+280], 25, sku_c, (False, False, True, True))
         draw.text((tx+area_w//2, ty_p+230), sku_val, font=f_sku, fill=BLANCO, anchor="mm")
     return flyer
