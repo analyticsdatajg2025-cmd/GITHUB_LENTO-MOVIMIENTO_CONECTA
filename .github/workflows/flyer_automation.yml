@@ -20,7 +20,7 @@ jobs:
           {i: 240, f: 245}, 
           {i: 245, f: 255}
         ]
-      fail-fast: false # [!] CLAVE: Si una falla, las demás NO se detienen
+      fail-fast: false # [!] CONTINGENCIA 1: Si una falla, las demás siguen.
 
     steps:
       - name: Checkout
@@ -34,7 +34,8 @@ jobs:
 
       - name: Instalar librerias
         run: |
-          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
+          # Instalación con reintentos automáticos si falla el servidor de Pip
+          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2 ||  pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
 
       - name: Ejecutar Bloque (${{ matrix.rango.i }} - ${{ matrix.rango.f }})
         env:
@@ -44,25 +45,24 @@ jobs:
           PYTHONDONTWRITEBYTECODE: 1
           PYTHONUNBUFFERED: 1 
         run: |
-          # [!] NUEVA ESPERA DINÁMICA: Mensajes cada 60s para evitar cancelación de GitHub
-          TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 30 ))
-          echo ">>> [!] SEGURIDAD API: Espera total programada: $TOTAL_ESPERA segundos."
+          # [!] STAY ALIVE: Bucle de señales de vida para GitHub
+          TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 10 ))
+          echo ">>> [!] SEGURIDAD API: Espera total: $TOTAL_ESPERA segundos."
           
           CONTADOR=0
           while [ $CONTADOR -lt $TOTAL_ESPERA ]; do
             RESTANTE=$((TOTAL_ESPERA - CONTADOR))
-            echo ">>> [STAY ALIVE] Faltan $RESTANTE segundos para iniciar el bloque..."
-            sleep 60
-            CONTADOR=$((CONTADOR + 60))
+            echo ">>> [STAY ALIVE] Faltan $RESTANTE segundos..."
+            sleep 30
+            CONTADOR=$((CONTADOR + 30))
           done
           
-          # 1. Blindaje de red y subida masiva
           git config --global http.postBuffer 1048576000
           git config --global core.compression 0
           
-          # 2. Limpieza de carpetas
           rm -rf temp_flyers temp_cache_img
           mkdir -p temp_flyers temp_cache_img
           
-          # 3. Ejecución con modo Verbose para monitoreo constante
-          python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
+          # [!] CONTINGENCIA 2: Reintento automático del script completo
+          # Si el script falla por un error de red o de Google, reintenta una segunda vez tras 10 segundos
+          python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (sleep 10 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
