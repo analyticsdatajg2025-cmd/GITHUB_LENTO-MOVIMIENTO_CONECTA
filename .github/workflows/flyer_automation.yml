@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120 # [!] Margen de 2 horas para procesos masivos
+    timeout-minutes: 120 # [!] Margen de 2 horas para procesos masivos y subidas pesadas
     strategy:
       matrix:
         rango: [
@@ -20,7 +20,7 @@ jobs:
           {i: 240, f: 245}, 
           {i: 245, f: 255}
         ]
-      fail-fast: false
+      fail-fast: false # [!] Clave: Si el bloque pesado falla, los demás terminan su trabajo
 
     steps:
       - name: Checkout
@@ -44,10 +44,11 @@ jobs:
           PYTHONDONTWRITEBYTECODE: 1
           # [!] AJUSTES SENIOR DE INFRAESTRUCTURA
           PYTHONIOENCODING: utf-8
-          MALLOC_ARENA_MAX: 2  # Previene la fragmentación de RAM en procesos largos
+          MALLOC_ARENA_MAX: 2  # Previene la fragmentación de RAM en procesos de alto volumen de imágenes
+          NODE_OPTIONS: "--max-old-space-size=4096" # Optimiza el orquestador interno de GitHub
         run: |
           # [!] AJUSTE DE ESPERA (Factor 5)
-          # Menos tiempo de espera = inicio rápido antes de que el runner entre en idle
+          # Escalonamiento para no saturar las cuotas de Google Sheets API
           TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 5 ))
           echo ">>> [!] INICIO SEGURO: Espera de $TOTAL_ESPERA segundos..."
           
@@ -58,19 +59,19 @@ jobs:
             CONTADOR=$((CONTADOR + 30))
           done
           
-          # [!] OPTIMIZACIÓN DE RED PARA SUBIDAS PESADAS
+          # [!] OPTIMIZACIÓN DE BUFFER PARA SUBIDAS DE ARCHIVOS GRANDES (300MB+)
           git config --global http.postBuffer 1048576000
           git config --global core.compression 0
           
-          # Limpieza de temporales
+          # Limpieza e higiene de carpetas temporales
           rm -rf temp_flyers temp_cache_img
           mkdir -p temp_flyers temp_cache_img
           
           # [!] LÓGICA DE EJECUCIÓN CON CONTINGENCIA
-          # El bloque 240 es crítico y se maneja solo para evitar colisiones de memoria
+          # El bloque 240 es crítico: procesa el PDF más grande y requiere toda la RAM limpia.
           if [ ${{ matrix.rango.i }} -eq 240 ]; then
-            echo ">>> [ZONA CRÍTICA] Generando PDF de alto volumen..."
+            echo ">>> [ZONA CRÍTICA] Generando PDF de alto volumen (Páginas completas)..."
             python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
           else
-            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Fallo detectado. Reintentando bloque..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
+            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Fallo detectado. Reintentando bloque secundario..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
           fi

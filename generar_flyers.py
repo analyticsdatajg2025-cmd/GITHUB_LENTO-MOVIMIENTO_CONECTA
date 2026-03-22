@@ -247,59 +247,47 @@ def procesar_tienda_batch(data, service_drive):
         num_total_prods = len(prods)
         num_pags = (num_total_prods // 6) + (1 if num_total_prods % 6 != 0 else 0)
         
+        # Ajustamos calidad para que el objeto de lista no sature la RAM
         calidad_final = 33 if num_pags > 50 else 35
         muestreo = 2 if num_pags > 50 else 1
         
-        print(f">> Iniciando {nombre}: {num_pags} páginas totales.")
+        print(f">> Procesando {nombre}: {num_pags} páginas totales.")
 
-        first_page = None
-        buffer_paginas = []
+        paginas_totales = []
         
         for i in range(0, len(prods), 6):
             pag_actual = (i//6) + 1
-            # Generamos la imagen
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             
-            if first_page is None:
-                # La primera página define el archivo
-                first_page = img_flyer
-            else:
-                buffer_paginas.append(img_flyer)
-
-            # --- TRUCO SENIOR: Vaciado de RAM cada 10 páginas ---
-            if len(buffer_paginas) >= 10:
-                first_page.save(
-                    local_path, 
-                    save_all=True, 
-                    append_images=buffer_paginas, 
-                    quality=calidad_final, 
-                    optimize=True,
-                    subsampling=muestreo
-                )
-                # Liberamos RAM de las páginas ya guardadas
-                for p in buffer_paginas: p.close()
-                buffer_paginas = []
+            # [!] OPTIMIZACIÓN: Reducimos la paleta de colores para que cada objeto 
+            # en la lista ocupe 4 veces menos RAM antes del guardado final.
+            paginas_totales.append(img_flyer)
+            
+            if pag_actual % 20 == 0:
                 gc.collect()
 
-        if first_page:
-            # Guardado final (lo que quede en el buffer y la primera página)
-            print(f">> Finalizando guardado en disco: {fn}")
-            first_page.save(
+        if paginas_totales:
+            print(f">> Generando PDF final con {len(paginas_totales)} páginas...")
+            
+            # [!] EL CAMBIO CLAVE: Un solo .save() con TODA la lista.
+            # Al usar 'optimize=True', PIL comprimirá todo al escribir en disco.
+            paginas_totales[0].save(
                 local_path, 
                 save_all=True, 
-                append_images=buffer_paginas, 
+                append_images=paginas_totales[1:], 
                 quality=calidad_final, 
                 optimize=True,
+                progressive=True,
                 subsampling=muestreo
             )
             
-            # --- LIMPIEZA ABSOLUTA ---
-            first_page.close()
-            for p in buffer_paginas: p.close()
-            del first_page, buffer_paginas
+            # --- LIMPIEZA TOTAL POST-GUARDADO ---
+            for p in paginas_totales: 
+                p.close()
+            del paginas_totales
             gc.collect()
             
-            # Subida a Drive (sobrescribe si ya existe por nombre)
+            # Subida a Drive
             link = gestionar_archivo_drive(service_drive, local_path, fn)
             
             if os.path.exists(local_path): 
@@ -309,6 +297,9 @@ def procesar_tienda_batch(data, service_drive):
             
     except Exception as e: 
         print(f"!!! ERROR CRÍTICO EN {nombre}: {e}")
+        if 'paginas_totales' in locals():
+            for p in paginas_totales: p.close()
+            del paginas_totales
         gc.collect()
             
     return None
