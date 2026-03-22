@@ -239,27 +239,65 @@ def procesar_tienda_batch(data, service_drive):
     nombre, grupo = data
     try:
         prods = grupo.to_dict('records')
+        clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
+        fn = f"LENTO_{clean}.pdf"
+        local_path = os.path.join(output_dir, fn)
+        
         paginas = []
+        
         for i in range(0, len(prods), 6):
             pag_actual = (i//6) + 1
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
             paginas.append(img_flyer)
-            gc.collect()
+            
+            # Limpieza frecuente de RAM (Cada 15 páginas)
+            if pag_actual % 15 == 0:
+                gc.collect()
 
         if paginas:
-            clean = "".join(c for c in str(nombre) if c.isalnum() or c in " _").strip().replace(" ", "_")
-            fn = f"LENTO_{clean}.pdf"
-            local_path = os.path.join(output_dir, fn)
-            gc.collect() 
-            paginas[0].save(local_path, save_all=True, append_images=paginas[1:], 
-                            quality=35, optimize=True, progressive=True, subsampling=2)
+            num_pags = len(paginas)
+            
+            # --- AJUSTE SOLICITADO: CALIDAD DINÁMICA ---
+            # Si el PDF tiene más de 50 páginas (como la de 350), usamos 33.
+            # Si tiene pocas, usamos 35 (que es tu estándar actual).
+            calidad_final = 33 if num_pags > 50 else 35
+            
+            # Subsampling 2 ahorra mucho espacio en archivos grandes sin perder nitidez de texto.
+            muestreo = 2 if num_pags > 50 else 1
+            
+            print(f">> Guardando {num_pags} págs | Calidad: {calidad_final} | Tienda: {nombre}")
+
+            paginas[0].save(
+                local_path, 
+                save_all=True, 
+                append_images=paginas[1:], 
+                quality=calidad_final, 
+                optimize=True, 
+                progressive=True, 
+                subsampling=muestreo
+            )
+            
+            # --- LIBERACIÓN DE RAM ABSOLUTA (Crucial para el bloque 240) ---
+            for p in paginas:
+                p.close()
+            
+            del paginas
+            gc.collect()
+            
+            link = gestionar_archivo_drive(service_drive, local_path, fn)
+            
+            if os.path.exists(local_path): 
+                os.remove(local_path)
+                
+            return [nombre, link]
+            
+    except Exception as e: 
+        print(f"!!! ERROR CRÍTICO EN {nombre}: {e}")
+        if 'paginas' in locals():
             for p in paginas: p.close()
             del paginas
             gc.collect()
-            link = gestionar_archivo_drive(service_drive, local_path, fn)
-            if os.path.exists(local_path): os.remove(local_path)
-            return [nombre, link]
-    except Exception as e: print(f"Error en {nombre}: {e}")
+            
     return None
 
 # --- FLUJO PRINCIPAL ---

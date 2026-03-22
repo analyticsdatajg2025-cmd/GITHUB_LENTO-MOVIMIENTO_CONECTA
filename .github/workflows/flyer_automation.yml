@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120 # [!] Aumentamos a 2 horas por si el PDF gigante demora en subir
     strategy:
       matrix:
         rango: [
@@ -20,7 +20,7 @@ jobs:
           {i: 240, f: 245}, 
           {i: 245, f: 255}
         ]
-      fail-fast: false # [!] CONTINGENCIA 1: Si una falla, las demás siguen.
+      fail-fast: false
 
     steps:
       - name: Checkout
@@ -34,35 +34,41 @@ jobs:
 
       - name: Instalar librerias
         run: |
-          # Instalación con reintentos automáticos si falla el servidor de Pip
-          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2 ||  pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
+          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2 || sleep 10 && pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
 
       - name: Ejecutar Bloque (${{ matrix.rango.i }} - ${{ matrix.rango.f }})
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
-          PYTHONDONTWRITEBYTECODE: 1
           PYTHONUNBUFFERED: 1 
+          PYTHONDONTWRITEBYTECODE: 1
         run: |
-          # [!] STAY ALIVE: Bucle de señales de vida para GitHub
-          TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 10 ))
-          echo ">>> [!] SEGURIDAD API: Espera total: $TOTAL_ESPERA segundos."
+          # [!] AJUSTE DE ESPERA SENIOR (Factor 5)
+          # Esto hace que las máquinas pesadas arranquen rápido y no se queden inactivas
+          TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 5 ))
+          echo ">>> [!] INICIO SEGURO: Espera de $TOTAL_ESPERA segundos..."
           
           CONTADOR=0
           while [ $CONTADOR -lt $TOTAL_ESPERA ]; do
-            RESTANTE=$((TOTAL_ESPERA - CONTADOR))
-            echo ">>> [STAY ALIVE] Faltan $RESTANTE segundos..."
+            echo ">>> [STAY ALIVE] Preparando entorno masivo... ($((TOTAL_ESPERA - CONTADOR))s restantes)"
             sleep 30
             CONTADOR=$((CONTADOR + 30))
           done
           
+          # [!] OPTIMIZACIÓN DE RED PARA PDFS GIGANTES (300MB+)
           git config --global http.postBuffer 1048576000
           git config --global core.compression 0
           
+          # Limpieza absoluta de temporales antes de empezar
           rm -rf temp_flyers temp_cache_img
           mkdir -p temp_flyers temp_cache_img
           
-          # [!] CONTINGENCIA 2: Reintento automático del script completo
-          # Si el script falla por un error de red o de Google, reintenta una segunda vez tras 10 segundos
-          python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (sleep 10 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
+          # [!] LÓGICA DE EJECUCIÓN CON CONTINGENCIA INTELIGENTE
+          # Si el bloque es el 240 (el pesado), le damos un solo intento con toda la RAM disponible.
+          # Para los demás, mantenemos el reintento.
+          if [ ${{ matrix.rango.i }} -eq 240 ]; then
+            echo ">>> [ZONA CRÍTICA] Procesando PDF Masivo..."
+            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
+          else
+            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Reintentando por fallo leve..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
+          fi
