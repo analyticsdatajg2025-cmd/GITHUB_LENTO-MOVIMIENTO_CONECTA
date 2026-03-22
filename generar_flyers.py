@@ -243,47 +243,63 @@ def procesar_tienda_batch(data, service_drive):
         fn = f"LENTO_{clean}.pdf"
         local_path = os.path.join(output_dir, fn)
         
-        paginas = []
+        # --- CONFIGURACIÓN DINÁMICA ---
+        num_total_prods = len(prods)
+        num_pags = (num_total_prods // 6) + (1 if num_total_prods % 6 != 0 else 0)
+        
+        calidad_final = 33 if num_pags > 50 else 35
+        muestreo = 2 if num_pags > 50 else 1
+        
+        print(f">> Iniciando {nombre}: {num_pags} páginas totales.")
+
+        first_page = None
+        buffer_paginas = []
         
         for i in range(0, len(prods), 6):
             pag_actual = (i//6) + 1
+            # Generamos la imagen
             img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
-            paginas.append(img_flyer)
             
-            # Limpieza frecuente de RAM (Cada 15 páginas)
-            if pag_actual % 15 == 0:
+            if first_page is None:
+                # La primera página define el archivo
+                first_page = img_flyer
+            else:
+                buffer_paginas.append(img_flyer)
+
+            # --- TRUCO SENIOR: Vaciado de RAM cada 10 páginas ---
+            if len(buffer_paginas) >= 10:
+                first_page.save(
+                    local_path, 
+                    save_all=True, 
+                    append_images=buffer_paginas, 
+                    quality=calidad_final, 
+                    optimize=True,
+                    subsampling=muestreo
+                )
+                # Liberamos RAM de las páginas ya guardadas
+                for p in buffer_paginas: p.close()
+                buffer_paginas = []
                 gc.collect()
 
-        if paginas:
-            num_pags = len(paginas)
-            
-            # --- AJUSTE SOLICITADO: CALIDAD DINÁMICA ---
-            # Si el PDF tiene más de 50 páginas (como la de 350), usamos 33.
-            # Si tiene pocas, usamos 35 (que es tu estándar actual).
-            calidad_final = 33 if num_pags > 50 else 35
-            
-            # Subsampling 2 ahorra mucho espacio en archivos grandes sin perder nitidez de texto.
-            muestreo = 2 if num_pags > 50 else 1
-            
-            print(f">> Guardando {num_pags} págs | Calidad: {calidad_final} | Tienda: {nombre}")
-
-            paginas[0].save(
+        if first_page:
+            # Guardado final (lo que quede en el buffer y la primera página)
+            print(f">> Finalizando guardado en disco: {fn}")
+            first_page.save(
                 local_path, 
                 save_all=True, 
-                append_images=paginas[1:], 
+                append_images=buffer_paginas, 
                 quality=calidad_final, 
-                optimize=True, 
-                progressive=True, 
+                optimize=True,
                 subsampling=muestreo
             )
             
-            # --- LIBERACIÓN DE RAM ABSOLUTA (Crucial para el bloque 240) ---
-            for p in paginas:
-                p.close()
-            
-            del paginas
+            # --- LIMPIEZA ABSOLUTA ---
+            first_page.close()
+            for p in buffer_paginas: p.close()
+            del first_page, buffer_paginas
             gc.collect()
             
+            # Subida a Drive (sobrescribe si ya existe por nombre)
             link = gestionar_archivo_drive(service_drive, local_path, fn)
             
             if os.path.exists(local_path): 
@@ -293,10 +309,7 @@ def procesar_tienda_batch(data, service_drive):
             
     except Exception as e: 
         print(f"!!! ERROR CRÍTICO EN {nombre}: {e}")
-        if 'paginas' in locals():
-            for p in paginas: p.close()
-            del paginas
-            gc.collect()
+        gc.collect()
             
     return None
 

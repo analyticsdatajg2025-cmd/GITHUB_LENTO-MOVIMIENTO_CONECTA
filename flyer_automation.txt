@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120 # [!] Margen de 2 horas para procesos masivos
+    timeout-minutes: 120 # [!] Aumentamos a 2 horas por si el PDF gigante demora en subir
     strategy:
       matrix:
         rango: [
@@ -34,7 +34,7 @@ jobs:
 
       - name: Instalar librerias
         run: |
-          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2 || (sleep 10 && pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2)
+          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2 || sleep 10 && pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2
 
       - name: Ejecutar Bloque (${{ matrix.rango.i }} - ${{ matrix.rango.f }})
         env:
@@ -42,12 +42,9 @@ jobs:
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
           PYTHONUNBUFFERED: 1 
           PYTHONDONTWRITEBYTECODE: 1
-          # [!] AJUSTES SENIOR DE INFRAESTRUCTURA
-          PYTHONIOENCODING: utf-8
-          MALLOC_ARENA_MAX: 2  # Previene la fragmentación de RAM en procesos largos
         run: |
-          # [!] AJUSTE DE ESPERA (Factor 5)
-          # Menos tiempo de espera = inicio rápido antes de que el runner entre en idle
+          # [!] AJUSTE DE ESPERA SENIOR (Factor 5)
+          # Esto hace que las máquinas pesadas arranquen rápido y no se queden inactivas
           TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 5 ))
           echo ">>> [!] INICIO SEGURO: Espera de $TOTAL_ESPERA segundos..."
           
@@ -58,19 +55,20 @@ jobs:
             CONTADOR=$((CONTADOR + 30))
           done
           
-          # [!] OPTIMIZACIÓN DE RED PARA SUBIDAS PESADAS
+          # [!] OPTIMIZACIÓN DE RED PARA PDFS GIGANTES (300MB+)
           git config --global http.postBuffer 1048576000
           git config --global core.compression 0
           
-          # Limpieza de temporales
+          # Limpieza absoluta de temporales antes de empezar
           rm -rf temp_flyers temp_cache_img
           mkdir -p temp_flyers temp_cache_img
           
-          # [!] LÓGICA DE EJECUCIÓN CON CONTINGENCIA
-          # El bloque 240 es crítico y se maneja solo para evitar colisiones de memoria
+          # [!] LÓGICA DE EJECUCIÓN CON CONTINGENCIA INTELIGENTE
+          # Si el bloque es el 240 (el pesado), le damos un solo intento con toda la RAM disponible.
+          # Para los demás, mantenemos el reintento.
           if [ ${{ matrix.rango.i }} -eq 240 ]; then
-            echo ">>> [ZONA CRÍTICA] Generando PDF de alto volumen..."
+            echo ">>> [ZONA CRÍTICA] Procesando PDF Masivo..."
             python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
           else
-            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Fallo detectado. Reintentando bloque..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
+            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Reintentando por fallo leve..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
           fi
