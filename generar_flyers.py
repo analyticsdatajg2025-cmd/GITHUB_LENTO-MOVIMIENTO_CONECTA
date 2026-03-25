@@ -310,39 +310,103 @@ ss_client, drive_service = conectar_servicios()
 # [!] REGLA DE ORO: Escalonamiento inicial ANTES de cargar datos pesados
 inicio = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 fin = int(sys.argv[2]) if len(sys.argv) > 2 else 999
-time.sleep((inicio // 25) * 45) # Escalonamiento para no saturar Google
+time.sleep((inicio // 25) * 45) 
 
+# 1. CARGA DE DATOS
 df_raw = lectura_segura(ss_client, "Origen Tdas")
 df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3], 'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7], 'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]})
 df_lookup = lectura_segura(ss_client, "listado_productos")
 img_dict = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', case=False).map(img_dict).fillna('')
 
+# 2. CARGA DE PRECIOS (PROMOS)
 promos = {}
 for p in ["Promo01", "Promo03", "Promo04"]:
     df_p = lectura_segura(ss_client, p)
     df_p['K'] = df_p['Lista Precios'].astype(str).str.replace(".0","") + "_" + df_p['SKU'].astype(str)
     promos.update(df_p.set_index('K')['Precio Vigente'].to_dict())
 
+# 3. FILTRADO INTELIGENTE DE TIENDAS (LC / EFE + TiendasxLista)
 df_txl = lectura_segura(ss_client, "TiendasxLista")
+# Set de nombres normalizados que SI están en la hoja TiendasxLista para hacer el match
+tiendas_permitidas_en_lista = set(df_txl['TIENDA'].astype(str).apply(normalizar_nombre_tienda).unique())
+
+def es_tienda_comercial(nombre):
+    # Pasamos todo a MAYÚSCULAS y quitamos espacios/guiones
+    nombre_n = normalizar_nombre_tienda(nombre)
+    
+    # 1. ¿Contiene las marcas clave? (La normalización ya convierte CURACAO en LC)
+    tiene_marca = "EFE" in nombre_n or "LC" in nombre_n
+    
+    # 2. ¿Está en tu hoja de mapeo? (Aquí está la magia del match inteligente)
+    # tiendas_permitidas_en_lista ya contiene nombres normalizados.
+    esta_en_lista = nombre_n in tiendas_permitidas_en_lista
+    
+    # 3. Filtro anti-basura reforzado
+    es_basura = any(x in nombre_n for x in ["PRUEBA", "TEST", "ALMACEN"]) or nombre_n in ["", "-"]
+    
+    return (tiene_marca or esta_en_lista) and not es_basura
+
+# Aplicamos filtro de tiendas
+df_origen = df_origen[df_origen['Tienda'].apply(es_tienda_comercial)]
+
+# 4. MAPEO DE LISTAS Y PRECIOS
 txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
-df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 
+# 5. FILTRADO DE STOCK Y PRECIO (Elimina "0", "-" y "SIN PRECIO")
+def validar_existencia(row):
+    st = str(row['Stock LM']).strip()
+    pr = str(row['Precio Vigente']).strip()
+    # Si stock es 0, - o vacío -> FUERA
+    # Si precio es SIN PRECIO, 0, - o vacío -> FUERA
+    if st in ["0", "0.0", "", "-", "nan"] or pr in ["SIN PRECIO", "0", "0.0", "", "-", "nan"]:
+        return False
+    return True
+
+df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
+df_final = df_final[df_final.apply(validar_existencia, axis=1)]
+
+print(f">> Procesando {len(df_final)} productos con stock y precio real.")
 # [!] ACTUALIZACIÓN DE HOJA MAESTRA (Solo la primera máquina)
 if inicio == 0:
     try:
-        print(">> Actualizando hoja maestra 'Detalle de Inventario'...")
+        print(">> Iniciando mantenimiento de Sheets y actualización maestra...")
+        
+        # 1. Identificar hojas basura PRIMERO
+        hojas_actuales = ss_client.worksheets()
+        hojas_a_borrar = [h for h in hojas_actuales if "Hoja" in h.title or "(" in h.title]
+        
+        for hoja in hojas_a_borrar:
+            try:
+                print(f"!!! Eliminando residuo: {hoja.title}")
+                ss_client.del_worksheet(hoja)
+                time.sleep(1.5) # Pausa vital para no saturar la cuota de Google
+            except: pass # Si ya se borró por otro hilo, ignorar
+
+        # 2. Actualizar 'Detalle de Inventario' de forma atómica
         ws_inv = ss_client.worksheet("Detalle de Inventario")
-        ws_inv.clear()
         columnas = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
         data_inv = [columnas] + df_final[columnas].fillna("-").values.tolist()
+        
+        # Usar update evita los duplicados que genera clear() en conexiones inestables
         ws_inv.update('A1', data_inv)
-        # Limpiar también la hoja de links
-        ss_client.worksheet("FLYER_TIENDA").clear()
-        ss_client.worksheet("FLYER_TIENDA").update('A1', [["TIENDA", "LINK DRIVE"]])
-    except Exception as e: print(f"Error actualizando maestra: {e}")
+        
+        # 3. Resetear FLYER_TIENDA
+        print(">> Reseteando FLYER_TIENDA...")
+        ws_links = ss_client.worksheet("FLYER_TIENDA")
+        ws_links.update('A1', [["TIENDA", "LINK DRIVE"]])
+        
+        # Borrar el resto de filas para que la hoja quede limpia
+        # Esto es más seguro que clear()
+        ws_links.resize(rows=1) 
+        ws_links.resize(rows=1000)
+
+        print(">> Mantenimiento completado. Sheets limpio.")
+
+    except Exception as e: 
+        print(f"Error en actualización maestra: {e}")
 
 tiendas_procesadas = list(df_final.groupby('Tienda'))
 total_reales = len(tiendas_procesadas)

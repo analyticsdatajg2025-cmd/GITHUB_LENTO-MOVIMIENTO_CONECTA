@@ -47,8 +47,16 @@ jobs:
           MALLOC_ARENA_MAX: 2  # Previene la fragmentación de RAM en procesos de alto volumen de imágenes
           NODE_OPTIONS: "--max-old-space-size=4096" # Optimiza el orquestador interno de GitHub
         run: |
+          # [!] REGLA DE ORO: Prioridad para la Máquina 0
+          # Si NO soy la máquina 0, espero 60 segundos adicionales.
+          # Esto permite que la máquina 0 limpie las hojas duplicadas "Hoja2 (x)" 
+          # y resetee la maestra sin que las otras máquinas causen colisiones de lectura.
+          if [ ${{ matrix.rango.i }} -ne 0 ]; then
+            echo ">>> [ESPERA ESTRATÉGICA] Dando tiempo a la Máquina 0 para mantenimiento de Sheets..."
+            sleep 60
+          fi
+
           # [!] AJUSTE DE ESPERA (Factor 5)
-          # Escalonamiento para no saturar las cuotas de Google Sheets API
           TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 5 ))
           echo ">>> [!] INICIO SEGURO: Espera de $TOTAL_ESPERA segundos..."
           
