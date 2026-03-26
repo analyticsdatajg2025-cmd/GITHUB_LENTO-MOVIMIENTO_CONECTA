@@ -304,63 +304,62 @@ def procesar_tienda_batch(data, service_drive):
             
     return None
 
-# --- FLUJO PRINCIPAL ---
+# --- FLUJO PRINCIPAL REFORMADO ---
 ss_client, drive_service = conectar_servicios()
 
-# [!] REGLA DE ORO: Escalonamiento inicial ANTES de cargar datos pesados
+# [!] REGLA DE ORO: Escalonamiento inicial
 inicio = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 fin = int(sys.argv[2]) if len(sys.argv) > 2 else 999
 time.sleep((inicio // 25) * 45) 
 
-# 1. CARGA DE DATOS
+# 1. CARGA DE DATOS ORIGEN
 df_raw = lectura_segura(ss_client, "Origen Tdas")
-df_origen = pd.DataFrame({'Semana': df_raw.iloc[:, 1], 'Tienda': df_raw.iloc[:, 3], 'Marca': df_raw.iloc[:, 6], 'SKU': df_raw.iloc[:, 7], 'Nombre Articulo': df_raw.iloc[:, 8], 'Stock LM': df_raw.iloc[:, 11]})
+df_origen = pd.DataFrame({
+    'Semana': df_raw.iloc[:, 1], 
+    'Tienda': df_raw.iloc[:, 3], 
+    'Marca': df_raw.iloc[:, 6], 
+    'SKU': df_raw.iloc[:, 7], 
+    'Nombre Articulo': df_raw.iloc[:, 8], 
+    'Stock LM': df_raw.iloc[:, 11]
+})
+
+# 2. CARGA DE AUXILIARES (Solo para Mapeo de Precios)
 df_lookup = lectura_segura(ss_client, "listado_productos")
 img_dict = df_lookup.set_index('sku')['base_image_path'].to_dict()
 df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', case=False).map(img_dict).fillna('')
 
-# 2. CARGA DE PRECIOS (PROMOS)
+# Cargamos TiendasxLista SOLO para saber qué LISTA de precios le toca a cada nombre
+df_txl = lectura_segura(ss_client, "TiendasxLista")
+txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
+
+# 3. [!] NUEVO FILTRO DE TIENDAS (BASADO 100% EN NOMBRE)
+def es_tienda_objetivo(nombre):
+    n_upper = str(nombre).upper()
+    # Si contiene EFE o LC (Curacao), pasa.
+    es_valida = "EFE" in n_upper or "LC" in n_upper or "CURACAO" in n_upper
+    # Filtro anti-basura manual
+    es_basura = n_upper in ["", "-", "ALMACEN", "PRUEBA"]
+    return es_valida and not es_basura
+
+# Filtramos el dataframe basándonos únicamente en el nombre de la columna Tienda
+df_origen = df_origen[df_origen['Tienda'].apply(es_tienda_objetivo)]
+
+# 4. ASIGNACIÓN DE PRECIOS Y STOCK
 promos = {}
 for p in ["Promo01", "Promo03", "Promo04"]:
     df_p = lectura_segura(ss_client, p)
     df_p['K'] = df_p['Lista Precios'].astype(str).str.replace(".0","") + "_" + df_p['SKU'].astype(str)
     promos.update(df_p.set_index('K')['Precio Vigente'].to_dict())
 
-# 3. FILTRADO INTELIGENTE DE TIENDAS (LC / EFE + TiendasxLista)
-df_txl = lectura_segura(ss_client, "TiendasxLista")
-# Set de nombres normalizados que SI están en la hoja TiendasxLista para hacer el match
-tiendas_permitidas_en_lista = set(df_txl['TIENDA'].astype(str).apply(normalizar_nombre_tienda).unique())
-
-def es_tienda_comercial(nombre):
-    # Pasamos todo a MAYÚSCULAS y quitamos espacios/guiones
-    nombre_n = normalizar_nombre_tienda(nombre)
-    
-    # 1. ¿Contiene las marcas clave? (La normalización ya convierte CURACAO en LC)
-    tiene_marca = "EFE" in nombre_n or "LC" in nombre_n
-    
-    # 2. ¿Está en tu hoja de mapeo? (Aquí está la magia del match inteligente)
-    # tiendas_permitidas_en_lista ya contiene nombres normalizados.
-    esta_en_lista = nombre_n in tiendas_permitidas_en_lista
-    
-    # 3. Filtro anti-basura reforzado
-    es_basura = any(x in nombre_n for x in ["PRUEBA", "TEST", "ALMACEN"]) or nombre_n in ["", "-"]
-    
-    return (tiene_marca or esta_en_lista) and not es_basura
-
-# Aplicamos filtro de tiendas
-df_origen = df_origen[df_origen['Tienda'].apply(es_tienda_comercial)]
-
-# 4. MAPEO DE LISTAS Y PRECIOS
-txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
+# Asignamos la lista buscando el nombre normalizado en el mapa
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
 
-# 5. FILTRADO DE STOCK Y PRECIO (Elimina "0", "-" y "SIN PRECIO")
+# 5. FILTRADO FINAL DE CALIDAD (Semana + Existencia real)
 def validar_existencia(row):
     st = str(row['Stock LM']).strip()
     pr = str(row['Precio Vigente']).strip()
-    # Si stock es 0, - o vacío -> FUERA
-    # Si precio es SIN PRECIO, 0, - o vacío -> FUERA
+    # Si no tiene stock o no tiene precio, lo sacamos del catálogo
     if st in ["0", "0.0", "", "-", "nan"] or pr in ["SIN PRECIO", "0", "0.0", "", "-", "nan"]:
         return False
     return True
@@ -368,7 +367,8 @@ def validar_existencia(row):
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 df_final = df_final[df_final.apply(validar_existencia, axis=1)]
 
-print(f">> Procesando {len(df_final)} productos con stock y precio real.")
+print(f">> Filtro aplicado: {len(df_final)} productos detectados en tiendas EFE/LC.")
+
 # [!] ACTUALIZACIÓN DE HOJA MAESTRA (Solo la primera máquina)
 if inicio == 0:
     try:
