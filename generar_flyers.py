@@ -172,7 +172,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
             with Image.open(path_img) as img:
                 flyer.paste(img.convert("RGBA"), (x+50, y+200), img.convert("RGBA"))
 
-        stock_txt = limpiar_valor_puro(prod.get('Stock LM', '0'), es_precio=False)
+        stock_txt = limpiar_valor_puro(prod.get('Stock Und LM', '0'), es_precio=False)
         color_st = GRIS_MARCA if stock_txt == "-" else (EFE_AZUL if es_efe else LC_AMARILLO)
         draw.rounded_rectangle([x+30, y+30, x+300, y+160], radius=20, fill=color_st)
         draw.text((x+165, y+65), "STOCK", font=f_stock_tag, fill=BLANCO if es_efe else NEGRO, anchor="mm")
@@ -320,7 +320,7 @@ df_origen = pd.DataFrame({
     'Marca': df_raw.iloc[:, 6], 
     'SKU': df_raw.iloc[:, 7], 
     'Nombre Articulo': df_raw.iloc[:, 8], 
-    'Stock LM': df_raw.iloc[:, 11]
+    'Stock Und LM': df_raw.iloc[:, 11]
 })
 
 # 2. CARGA DE AUXILIARES (Solo para Mapeo de Precios)
@@ -332,16 +332,16 @@ df_origen['image_link'] = df_origen['SKU'].astype(str).str.replace('-EX', '', ca
 df_txl = lectura_segura(ss_client, "TiendasxLista")
 txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","") for r in df_txl.to_dict('records') if 'TIENDA' in r}
 
-# 3. [!] NUEVO FILTRO DE TIENDAS (BASADO 100% EN NOMBRE)
+# 3. [!] NUEVO FILTRO DE TIENDAS (BASADO 100% EN NOMBRE DE ORIGEN TDAS)
 def es_tienda_objetivo(nombre):
-    n_upper = str(nombre).upper()
-    # Si contiene EFE o LC (Curacao), pasa.
-    es_valida = "EFE" in n_upper or "LC" in n_upper or "CURACAO" in n_upper
-    # Filtro anti-basura manual
-    es_basura = n_upper in ["", "-", "ALMACEN", "PRUEBA"]
-    return es_valida and not es_basura
+    # Convertimos a string por seguridad, limpiamos espacios y pasamos a MAYÚSCULAS
+    n_clean = str(nombre).strip().upper()
+    
+    # Si contiene las siglas clave, se queda. No importa si es "ITINERANTE", "ABANCAY" o "JAEN".
+    # Al usar "in", detectamos la marca en cualquier parte del texto.
+    return "EFE" in n_clean or "LC" in n_clean or "CURACAO" in n_clean
 
-# Filtramos el dataframe basándonos únicamente en el nombre de la columna Tienda
+# Filtramos el dataframe basándonos únicamente en el nombre de la columna Tienda de Origen Tdas
 df_origen = df_origen[df_origen['Tienda'].apply(es_tienda_objetivo)]
 
 # 4. ASIGNACIÓN DE PRECIOS Y STOCK
@@ -357,7 +357,7 @@ df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astyp
 
 # 5. FILTRADO FINAL DE CALIDAD (Semana + Existencia real)
 def validar_existencia(row):
-    st = str(row['Stock LM']).strip()
+    st = str(row['Stock Und LM']).strip()
     pr = str(row['Precio Vigente']).strip()
     # Si no tiene stock o no tiene precio, lo sacamos del catálogo
     if st in ["0", "0.0", "", "-", "nan"] or pr in ["SIN PRECIO", "0", "0.0", "", "-", "nan"]:
@@ -387,7 +387,7 @@ if inicio == 0:
 
         # 2. Actualizar 'Detalle de Inventario' de forma atómica
         ws_inv = ss_client.worksheet("Detalle de Inventario")
-        columnas = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock LM', 'LISTA', 'Precio Vigente', 'image_link']
+        columnas = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock Und LM', 'LISTA', 'Precio Vigente', 'image_link']
         data_inv = [columnas] + df_final[columnas].fillna("-").values.tolist()
         
         # Usar update evita los duplicados que genera clear() en conexiones inestables
