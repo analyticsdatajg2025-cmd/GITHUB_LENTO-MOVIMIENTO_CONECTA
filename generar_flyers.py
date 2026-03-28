@@ -76,10 +76,20 @@ def lectura_segura(client, nombre_hoja):
     raise Exception(f"Fallo lectura tras 5 intentos en {nombre_hoja}")
 
 def normalizar_nombre_tienda(nombre):
-    s = str(nombre).upper().replace(" ", "").replace("-", "")
-    if s.endswith("EFE"): s = "EFE" + s[:-3]
-    if s.endswith("LC"): s = "LC" + s[:-2]
-    return s
+    # 1. Limpieza total: Mayúsculas y quitamos símbolos que estorban
+    s = str(nombre).upper().replace("-", " ").replace(".", " ").replace(",", " ")
+    
+    # 2. Estandarización de Marcas (El puente de match)
+    if "CURACAO" in s: s = s.replace("CURACAO", "LC")
+    
+    # Limpiamos variaciones de "TIENDA" para que solo quede EFE
+    if "EFE" in s:
+        s = s.replace("TIENDAS", "").replace("TIENDA", "")
+    
+    # 3. La MAGIA: Separar palabras, ordenarlas alfabéticamente y pegarlas
+    # Esto elimina el problema del desorden en los nombres humanos
+    palabras = sorted([p for p in s.split() if p.strip()])
+    return "".join(palabras)
 
 def descargar_y_cachear(url):
     if not url or str(url).lower() in ['nan', ''] or url in cache_memoria: return
@@ -334,14 +344,10 @@ txl_map = {normalizar_nombre_tienda(r['TIENDA']): str(r['LISTA']).replace(".0","
 
 # 3. [!] NUEVO FILTRO DE TIENDAS (BASADO 100% EN NOMBRE DE ORIGEN TDAS)
 def es_tienda_objetivo(nombre):
-    # Convertimos a string por seguridad, limpiamos espacios y pasamos a MAYÚSCULAS
-    n_clean = str(nombre).strip().upper()
-    
-    # Si contiene las siglas clave, se queda. No importa si es "ITINERANTE", "ABANCAY" o "JAEN".
-    # Al usar "in", detectamos la marca en cualquier parte del texto.
+    # Añadimos replace de guion para que el filtro "in" sea más limpio
+    n_clean = str(nombre).upper().replace("-", " ").strip()
     return "EFE" in n_clean or "LC" in n_clean or "CURACAO" in n_clean
 
-# Filtramos el dataframe basándonos únicamente en el nombre de la columna Tienda de Origen Tdas
 df_origen = df_origen[df_origen['Tienda'].apply(es_tienda_objetivo)]
 
 # 4. ASIGNACIÓN DE PRECIOS Y STOCK
@@ -351,7 +357,7 @@ for p in ["Promo01", "Promo03", "Promo04"]:
     df_p['K'] = df_p['Lista Precios'].astype(str).str.replace(".0","") + "_" + df_p['SKU'].astype(str)
     promos.update(df_p.set_index('K')['Precio Vigente'].to_dict())
 
-# Asignamos la lista buscando el nombre normalizado en el mapa
+# Asignamos la lista buscando el nombre normalizado (ordenado alfabéticamente)
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
 
@@ -367,7 +373,8 @@ def validar_existencia(row):
 df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
 df_final = df_final[df_final.apply(validar_existencia, axis=1)]
 
-print(f">> Filtro aplicado: {len(df_final)} productos detectados en tiendas EFE/LC.")
+print(f">> Tiendas detectadas con marca EFE/LC: {df_origen['Tienda'].nunique()}")
+print(f">> Filtro aplicado: {len(df_final)} productos con stock y precio real.")
 
 # [!] ACTUALIZACIÓN DE HOJA MAESTRA (Solo la primera máquina)
 if inicio == 0:
