@@ -76,18 +76,23 @@ def lectura_segura(client, nombre_hoja):
     raise Exception(f"Fallo lectura tras 5 intentos en {nombre_hoja}")
 
 def normalizar_nombre_tienda(nombre):
-    # 1. Limpieza total: Mayúsculas y quitamos símbolos que estorban
+    # 1. Limpieza total y estandarización de caracteres
     s = str(nombre).upper().replace("-", " ").replace(".", " ").replace(",", " ")
     
-    # 2. Estandarización de Marcas (El puente de match)
+    # 2. Estandarización de Marcas y Términos Genéricos
+    # Reemplazamos términos largos por cortos o los eliminamos si son "ruido"
     if "CURACAO" in s: s = s.replace("CURACAO", "LC")
+    if "TIENDAS EFE" in s: s = s.replace("TIENDAS EFE", "EFE")
+    if "TIENDA EFE" in s: s = s.replace("TIENDA EFE", "EFE")
     
-    # Limpiamos variaciones de "TIENDA" para que solo quede EFE
-    if "EFE" in s:
-        s = s.replace("TIENDAS", "").replace("TIENDA", "")
+    # [!] LIMPIEZA DE RUIDO ESPECÍFICO (Casos Petit Thouars, Santa Anita, etc.)
+    # Eliminamos términos que varían entre hojas para que solo quede el "núcleo" del nombre
+    s = s.replace("FLAG SHIP", " ").replace("FLAGSHIP", " ")
+    s = s.replace("MALL AVENTURA", " ").replace("MALL", " ")
+    s = s.replace("LA UNION", "UNION") # Estandariza "La Unión" y "Union"
+    s = s.replace("INTINERANTE", "ITINERANTE") # Por si vuelve el error de dedo
     
     # 3. La MAGIA: Separar palabras, ordenarlas alfabéticamente y pegarlas
-    # Esto elimina el problema del desorden en los nombres humanos
     palabras = sorted([p for p in s.split() if p.strip()])
     return "".join(palabras)
 
