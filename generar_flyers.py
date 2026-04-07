@@ -76,25 +76,21 @@ def lectura_segura(client, nombre_hoja):
     raise Exception(f"Fallo lectura tras 5 intentos en {nombre_hoja}")
 
 def normalizar_nombre_tienda(nombre):
-    # 1. Limpieza total y estandarización de caracteres
-    s = str(nombre).upper().replace("-", " ").replace(".", " ").replace(",", " ")
+    # 1. Pasamos a mayúsculas y quitamos espacios invisibles a los bordes
+    s = str(nombre).strip().upper()
     
-    # 2. Estandarización de Marcas y Términos Genéricos
-    # Reemplazamos términos largos por cortos o los eliminamos si son "ruido"
+    # 2. Quitamos tildes (Opcional pero recomendado para evitar fallos de teclado)
+    # Si quieres ser ultra seguro con las tildes:
+    s = s.replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+    
+    # 3. Estandarizamos la marca por si acaso
     if "CURACAO" in s: s = s.replace("CURACAO", "LC")
-    if "TIENDAS EFE" in s: s = s.replace("TIENDAS EFE", "EFE")
-    if "TIENDA EFE" in s: s = s.replace("TIENDA EFE", "EFE")
     
-    # [!] LIMPIEZA DE RUIDO ESPECÍFICO (Casos Petit Thouars, Santa Anita, etc.)
-    # Eliminamos términos que varían entre hojas para que solo quede el "núcleo" del nombre
-    s = s.replace("FLAG SHIP", " ").replace("FLAGSHIP", " ")
-    s = s.replace("MALL AVENTURA", " ").replace("MALL", " ")
-    s = s.replace("LA UNION", "UNION") # Estandariza "La Unión" y "Union"
-    s = s.replace("INTINERANTE", "ITINERANTE") # Por si vuelve el error de dedo
+    # 4. Quitamos guiones y pegamos todo
+    # Esto hace que "Tumbes - EFE" y "Tumbes-EFE" sean ambos "TUMBESEFE"
+    s = s.replace("-", "").replace(".", "").replace(",", "")
     
-    # 3. La MAGIA: Separar palabras, ordenarlas alfabéticamente y pegarlas
-    palabras = sorted([p for p in s.split() if p.strip()])
-    return "".join(palabras)
+    return "".join(s.split())
 
 def descargar_y_cachear(url):
     if not url or str(url).lower() in ['nan', ''] or url in cache_memoria: return
