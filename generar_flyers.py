@@ -28,7 +28,12 @@ os.makedirs(output_dir, exist_ok=True)
 os.makedirs(cache_dir, exist_ok=True)
 
 ahora_global = datetime.utcnow() - timedelta(hours=5)
-semana_actual = f"Sem{ahora_global.isocalendar()[1]}"
+MESES_ES = {
+    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+}
+mes_actual = MESES_ES[ahora_global.month]
 
 cache_memoria = {}
 
@@ -326,8 +331,8 @@ time.sleep((inicio // 25) * 45)
 # 1. CARGA DE DATOS ORIGEN
 df_raw = lectura_segura(ss_client, "Origen Tdas")
 df_origen = pd.DataFrame({
-    'Semana': df_raw.iloc[:, 1], 
-    'Tienda': df_raw.iloc[:, 3], 
+    'Mes': df_raw.iloc[:, 1],
+    'Tienda': df_raw.iloc[:, 3],
     'Marca': df_raw.iloc[:, 6], 
     'SKU': df_raw.iloc[:, 7], 
     'Nombre Articulo': df_raw.iloc[:, 8], 
@@ -362,7 +367,7 @@ for p in ["Promo01", "Promo03", "Promo04"]:
 df_origen['LISTA'] = df_origen['Tienda'].apply(normalizar_nombre_tienda).map(txl_map).fillna("")
 df_origen['Precio Vigente'] = (df_origen['LISTA'] + "_" + df_origen['SKU'].astype(str)).map(promos).fillna("SIN PRECIO")
 
-# 5. FILTRADO FINAL DE CALIDAD (Semana + Existencia real)
+# 5. FILTRADO FINAL DE CALIDAD (Mes + Existencia real)
 def validar_existencia(row):
     st = str(row['Stock Und LM']).strip()
     pr = str(row['Precio Vigente']).strip()
@@ -371,7 +376,7 @@ def validar_existencia(row):
         return False
     return True
 
-df_final = df_origen[df_origen['Semana'].astype(str) == semana_actual].copy()
+df_final = df_origen[df_origen['Mes'].astype(str).str.strip() == mes_actual].copy()
 df_final = df_final[df_final.apply(validar_existencia, axis=1)]
 
 print(f">> Tiendas detectadas con marca EFE/LC: {df_origen['Tienda'].nunique()}")
@@ -395,7 +400,7 @@ if inicio == 0:
 
         # 2. Actualizar 'Detalle de Inventario' de forma atómica
         ws_inv = ss_client.worksheet("Detalle de Inventario")
-        columnas = ['Semana', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock Und LM', 'LISTA', 'Precio Vigente', 'image_link']
+        columnas = ['Mes', 'Tienda', 'Marca', 'SKU', 'Nombre Articulo', 'Stock Und LM', 'LISTA', 'Precio Vigente', 'image_link']
         data_inv = [columnas] + df_final[columnas].fillna("-").values.tolist()
         
         # Usar update evita los duplicados que genera clear() en conexiones inestables
