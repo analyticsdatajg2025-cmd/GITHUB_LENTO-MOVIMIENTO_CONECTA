@@ -31,7 +31,7 @@ ahora_global = datetime.utcnow() - timedelta(hours=5)
 MESES_ES = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
     5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
-    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+    9: "Setiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 mes_actual = MESES_ES[ahora_global.month]
 
