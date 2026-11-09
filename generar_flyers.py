@@ -363,6 +363,18 @@ def procesar_tienda_batch(data, service_drive):
 # --- FLUJO PRINCIPAL REFORMADO ---
 ss_client, drive_service = conectar_servicios()
 
+# Verificar el acceso a Google Drive ANTES de tocar el Sheet: si el token OAuth
+# (secret GOOGLE_TOKEN_JSON) venció, antes se vaciaba FLYER_TIENDA y luego fallaban
+# todas las subidas con "invalid_grant", dejando a las tiendas sin links.
+try:
+    drive_service.files().get(fileId=DRIVE_FOLDER_ID, fields="id", supportsAllDrives=True).execute()
+except Exception as e:
+    print(f"!!! ERROR: no hay acceso a la carpeta de Google Drive ({e}).")
+    if "invalid_grant" in str(e):
+        print("!!! El token de Google (secret GOOGLE_TOKEN_JSON) venció o fue revocado: hay que generarlo de nuevo.")
+    print("!!! No se toca el Sheet ni FLYER_TIENDA.")
+    sys.exit(1)
+
 # [!] REGLA DE ORO: Escalonamiento inicial
 inicio = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 fin = int(sys.argv[2]) if len(sys.argv) > 2 else 999
@@ -559,4 +571,8 @@ if tienda_links:
     except Exception as e: 
         print(f"!!! Error en escritura final: {e}")
 
-print(">> PROCESO COMPLETADO CON ÉXITO.")
+fallidas = len(tiendas_a_procesar) - len(tienda_links)
+if fallidas:
+    print(f"!!! {fallidas} de {len(tiendas_a_procesar)} tiendas de este bloque NO se generaron o subieron. Revisa los errores arriba.")
+    sys.exit(1)
+print(f">> PROCESO COMPLETADO CON ÉXITO ({len(tienda_links)} tiendas).")
