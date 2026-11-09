@@ -10,6 +10,8 @@ import json
 import textwrap
 import time
 import hashlib
+import re
+from collections import Counter
 from datetime import datetime, timedelta
 from oauth2client.service_account import ServiceAccountCredentials
 from concurrent.futures import ThreadPoolExecutor
@@ -97,20 +99,58 @@ def normalizar_nombre_tienda(nombre):
     
     return "".join(s.split())
 
+# Caché de imágenes descargadas desde la red de la empresa con herramientas/actualizar_imagenes.bat
+# (lacuracao.pe bloquea las descargas desde GitHub). El workflow la baja del release "imagenes-cache".
+CARPETA_CACHE_LAPTOP = "imagenes_cache"   # archivos md5(url).jpg
+LISTA_NECESARIAS = "imagenes_necesarias.txt"
+BLOQUEOS = (401, 403, 404, 410, 426, 429)
+estado_descargas = {"intentadas": 0, "ok": 0, "corte": False}
+fallos_imagenes = Counter()
+ejemplos_fallo = {}
+
 def descargar_y_cachear(url):
     if not url or str(url).lower() in ['nan', ''] or url in cache_memoria: return
-    fname = os.path.join(cache_dir, hashlib.md5(url.encode()).hexdigest() + ".png")
+    clave = hashlib.md5(url.encode()).hexdigest()
+    fname = os.path.join(cache_dir, clave + ".png")
     if os.path.exists(fname):
         cache_memoria[url] = fname
         return
+    # 1) Imagen ya descargada desde la laptop
+    laptop = os.path.join(CARPETA_CACHE_LAPTOP, clave + ".jpg")
+    if os.path.exists(laptop):
+        try:
+            with Image.open(laptop) as img:
+                img = img.convert("RGBA"); img.thumbnail((550, 550)); img.save(fname, "PNG")
+            cache_memoria[url] = fname
+            return
+        except Exception:
+            pass
+    # 2) Intentar descargar (si el CDN está bloqueando, no insistir)
+    if estado_descargas["corte"]:
+        cache_memoria[url] = None
+        fallos_imagenes["omitida (servidor bloqueando)"] += 1
+        return
+    motivo = None
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        with Image.open(BytesIO(res.content)) as img:
-            img = img.convert("RGBA")
-            img.thumbnail((550, 550))
-            img.save(fname, "PNG")
-        cache_memoria[url] = fname
-    except: cache_memoria[url] = None
+        if res.status_code != 200:
+            motivo = f"HTTP {res.status_code}"
+        else:
+            with Image.open(BytesIO(res.content)) as img:
+                img = img.convert("RGBA")
+                img.thumbnail((550, 550))
+                img.save(fname, "PNG")
+            cache_memoria[url] = fname
+            estado_descargas["intentadas"] += 1; estado_descargas["ok"] += 1
+            return
+    except Exception as e:
+        motivo = type(e).__name__
+    cache_memoria[url] = None
+    fallos_imagenes[motivo] += 1
+    ejemplos_fallo.setdefault(motivo, url)
+    estado_descargas["intentadas"] += 1
+    if estado_descargas["intentadas"] >= 30 and estado_descargas["ok"] == 0 and motivo in ("HTTP 426", "HTTP 403", "HTTP 429"):
+        estado_descargas["corte"] = True
 
 def draw_custom_rounded(draw, xy, radius, fill, corners=(True, True, True, True)):
     x0, y0, x1, y1 = xy
@@ -330,13 +370,12 @@ time.sleep((inicio // 25) * 45)
 
 # 1. CARGA DE DATOS ORIGEN
 df_raw = lectura_segura(ss_client, "Origen Tdas")
+# Columnas por nombre (si alguien mueve una columna, no se leen datos equivocados).
+# Si un nombre no existe, se usa la posición histórica (B, D, G, H, I, L).
+COLUMNAS_ORIGEN = {'Mes': 1, 'Tienda': 3, 'Marca': 6, 'SKU': 7, 'Nombre Articulo': 8, 'Stock Und LM': 11}
 df_origen = pd.DataFrame({
-    'Mes': df_raw.iloc[:, 1],
-    'Tienda': df_raw.iloc[:, 3],
-    'Marca': df_raw.iloc[:, 6], 
-    'SKU': df_raw.iloc[:, 7], 
-    'Nombre Articulo': df_raw.iloc[:, 8], 
-    'Stock Und LM': df_raw.iloc[:, 11]
+    col: (df_raw[col] if col in df_raw.columns else df_raw.iloc[:, pos])
+    for col, pos in COLUMNAS_ORIGEN.items()
 })
 
 # 2. CARGA DE AUXILIARES (Solo para Mapeo de Precios)
@@ -376,11 +415,35 @@ def validar_existencia(row):
         return False
     return True
 
-df_final = df_origen[df_origen['Mes'].astype(str).str.strip() == mes_actual].copy()
-df_final = df_final[df_final.apply(validar_existencia, axis=1)]
+mes_col = df_origen['Mes'].astype(str).str.strip().str.capitalize().replace({"Septiembre": "Setiembre"})
+meses_cargados = [m for m in MESES_ES.values() if (mes_col == m).any()]
+print(f">> Meses en 'Origen Tdas': {meses_cargados}. Mes actual: {mes_actual}")
+mes_usado = mes_actual
+if mes_actual not in meses_cargados:
+    # A inicio de mes los datos nuevos aún no están: se usa el último mes cargado para no dejar sin catálogo
+    orden = list(MESES_ES.values())
+    idx = orden.index(mes_actual)
+    anteriores = [orden[(idx - k) % 12] for k in range(1, 12)]
+    mes_usado = next((m for m in anteriores if m in meses_cargados), None)
+    print(f"!!! AVISO: no hay datos de {mes_actual} en 'Origen Tdas'. Se usa el último mes cargado: {mes_usado}.")
+df_final = df_origen[mes_col == mes_usado].copy()
+if not df_final.empty:
+    df_final = df_final[df_final.apply(validar_existencia, axis=1)]
 
 print(f">> Tiendas detectadas con marca EFE/LC: {df_origen['Tienda'].nunique()}")
-print(f">> Filtro aplicado: {len(df_final)} productos con stock y precio real.")
+print(f">> Filtro aplicado: {len(df_final)} productos con stock y precio real (mes {mes_usado}).")
+if df_final.empty:
+    # Antes el script seguía, vaciaba FLYER_TIENDA y caía con KeyError: 'Tienda'
+    print("!!! ERROR: 0 productos tras el filtro. Revisa 'Origen Tdas' (columna Mes), TiendasxLista y Promo01/03/04.")
+    print("!!! No se toca el Sheet ni FLYER_TIENDA para conservar los catálogos anteriores.")
+    sys.exit(1)
+
+# Lista de imágenes para herramientas/actualizar_imagenes.bat (la sube la máquina 0 al release)
+if inicio == 0:
+    urls_necesarias = sorted(set(u for u in df_final['image_link'] if u))
+    with open(LISTA_NECESARIAS, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(urls_necesarias) + "\n")
+    print(f">> {len(urls_necesarias)} imágenes necesarias escritas en {LISTA_NECESARIAS}")
 
 # [!] ACTUALIZACIÓN DE HOJA MAESTRA (Solo la primera máquina)
 if inicio == 0:
@@ -389,7 +452,12 @@ if inicio == 0:
         
         # 1. Identificar hojas basura PRIMERO
         hojas_actuales = ss_client.worksheets()
-        hojas_a_borrar = [h for h in hojas_actuales if "Hoja" in h.title or "(" in h.title]
+        # Solo hojas creadas por error ("Hoja 2", "Hoja2 (1)", "Detalle de Inventario (2)"...);
+        # nunca las hojas que usa el proceso.
+        protegidas = {"Origen Tdas", "listado_productos", "TiendasxLista", "Promo01", "Promo03",
+                      "Promo04", "Detalle de Inventario", "FLYER_TIENDA"}
+        patron = re.compile(r"^(Hoja\s*\d+(\s*\(\d+\))?|.+\s\(\d+\))$")
+        hojas_a_borrar = [h for h in hojas_actuales if h.title not in protegidas and patron.match(h.title.strip())]
         
         for hoja in hojas_a_borrar:
             try:
@@ -443,9 +511,15 @@ if not tiendas_a_procesar:
 
 # Descarga previa (Blindada contra lista vacía)
 try:
-    urls = pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique()
+    urls = [u for u in pd.concat([g for n, g in tiendas_a_procesar])['image_link'].unique() if u]
     with ThreadPoolExecutor(max_workers=5) as exe:
-        exe.map(descargar_y_cachear, urls)
+        list(exe.map(descargar_y_cachear, urls))
+    ok = sum(1 for u in urls if cache_memoria.get(u))
+    print(f">> Imágenes: {ok}/{len(urls)} disponibles ({estado_descargas['ok']} descargadas ahora, resto desde caché).")
+    for motivo, n in fallos_imagenes.most_common():
+        print(f"   Aviso: {n} imágenes fallaron por {motivo}. Ejemplo: {ejemplos_fallo.get(motivo, '-')}")
+    if fallos_imagenes:
+        print("   Aviso: para completar las imágenes, ejecuta herramientas/actualizar_imagenes.bat en tu laptop.")
 except Exception as e:
     print(f">>> Error preparando imágenes: {e}")
 

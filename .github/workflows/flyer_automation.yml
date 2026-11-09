@@ -6,80 +6,110 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+    paths: # solo cuando cambia el proceso, no por documentación o herramientas
+      - 'generar_flyers.py'
+      - 'requirements.txt'
+      - '.github/workflows/flyer_automation.yml'
+
+# Evita que dos ejecuciones (p. ej. push + programada) escriban el Sheet al mismo tiempo
+concurrency:
+  group: flyers-lento
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120 # [!] Margen de 2 horas para procesos masivos y subidas pesadas
+    timeout-minutes: 120 # Margen para procesos masivos y subidas pesadas
+    permissions:
+      contents: write # subir la lista de imágenes al release "imagenes-cache"
+      actions: write  # paso "Mantener workflow activo"
     strategy:
       matrix:
         rango: [
           {i: 0, f: 25}, {i: 25, f: 50}, {i: 50, f: 75}, {i: 75, f: 100},
           {i: 100, f: 125}, {i: 125, f: 150}, {i: 150, f: 175}, {i: 175, f: 200},
-          {i: 200, f: 220}, {i: 220, f: 240}, 
-          {i: 240, f: 245}, 
+          {i: 200, f: 220}, {i: 220, f: 240},
+          {i: 240, f: 245},
           {i: 245, f: 255}
         ]
-      fail-fast: false # [!] Clave: Si el bloque pesado falla, los demás terminan su trabajo
+      fail-fast: false # Si un bloque falla, los demás terminan su trabajo
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
 
       - name: Instalar librerias
+        # Versiones fijas para que una actualización de pandas/Pillow no rompa el proceso
+        run: pip install -r requirements.txt || (sleep 10 && pip install -r requirements.txt)
+
+      - name: Bajar caché de imágenes
+        # ZIP con las imágenes descargadas desde la red de la empresa con
+        # herramientas/actualizar_imagenes.bat (lacuracao.pe bloquea las descargas desde GitHub)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2 || (sleep 10 && pip install pandas requests Pillow gspread oauth2client google-api-python-client google-auth-oauthlib google-auth-httplib2)
+          mkdir -p imagenes_cache
+          if gh release download imagenes-cache --pattern imagenes_cache.zip --repo "${{ github.repository }}" --clobber; then
+            unzip -q -o imagenes_cache.zip -d imagenes_cache
+            echo "Caché de imágenes: $(ls imagenes_cache | wc -l) archivos"
+          else
+            echo "Aún no hay caché de imágenes (release 'imagenes-cache')."
+          fi
 
       - name: Ejecutar Bloque (${{ matrix.rango.i }} - ${{ matrix.rango.f }})
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
-          PYTHONUNBUFFERED: 1 
+          PYTHONUNBUFFERED: 1
           PYTHONDONTWRITEBYTECODE: 1
-          # [!] AJUSTES SENIOR DE INFRAESTRUCTURA
           PYTHONIOENCODING: utf-8
-          MALLOC_ARENA_MAX: 2  # Previene la fragmentación de RAM en procesos de alto volumen de imágenes
-          NODE_OPTIONS: "--max-old-space-size=4096" # Optimiza el orquestador interno de GitHub
+          MALLOC_ARENA_MAX: 2 # Previene la fragmentación de RAM en procesos de alto volumen de imágenes
         run: |
-          # [!] REGLA DE ORO: Prioridad para la Máquina 0
-          # Si NO soy la máquina 0, espero 60 segundos adicionales.
-          # Esto permite que la máquina 0 limpie las hojas duplicadas "Hoja2 (x)" 
-          # y resetee la maestra sin que las otras máquinas causen colisiones de lectura.
+          # La máquina 0 limpia hojas duplicadas y resetea FLYER_TIENDA; las demás esperan 60 s
           if [ ${{ matrix.rango.i }} -ne 0 ]; then
-            echo ">>> [ESPERA ESTRATÉGICA] Dando tiempo a la Máquina 0 para mantenimiento de Sheets..."
+            echo ">>> [ESPERA] Dando tiempo a la Máquina 0 para mantenimiento de Sheets..."
             sleep 60
           fi
 
-          # [!] AJUSTE DE ESPERA (Factor 5)
+          # Escalonamiento para no exceder la cuota de lectura de Google Sheets
           TOTAL_ESPERA=$(( (${{ matrix.rango.i }} / 25) * 5 ))
-          echo ">>> [!] INICIO SEGURO: Espera de $TOTAL_ESPERA segundos..."
-          
-          CONTADOR=0
-          while [ $CONTADOR -lt $TOTAL_ESPERA ]; do
-            echo ">>> [STAY ALIVE] Preparando entorno masivo... ($((TOTAL_ESPERA - CONTADOR))s restantes)"
-            sleep 30
-            CONTADOR=$((CONTADOR + 30))
-          done
-          
-          # [!] OPTIMIZACIÓN DE BUFFER PARA SUBIDAS DE ARCHIVOS GRANDES (300MB+)
-          git config --global http.postBuffer 1048576000
-          git config --global core.compression 0
-          
-          # Limpieza e higiene de carpetas temporales
+          echo ">>> Espera de $TOTAL_ESPERA segundos..."
+          sleep $TOTAL_ESPERA
+
           rm -rf temp_flyers temp_cache_img
           mkdir -p temp_flyers temp_cache_img
-          
-          # [!] LÓGICA DE EJECUCIÓN CON CONTINGENCIA
-          # El bloque 240 es crítico: procesa el PDF más grande y requiere toda la RAM limpia.
-          if [ ${{ matrix.rango.i }} -eq 240 ]; then
-            echo ">>> [ZONA CRÍTICA] Generando PDF de alto volumen (Páginas completas)..."
+
+          # La máquina 0 no se reintenta: su mantenimiento resetea FLYER_TIENDA y repetirlo
+          # borraría los links que ya escribieron las demás máquinas.
+          if [ ${{ matrix.rango.i }} -eq 0 ] || [ ${{ matrix.rango.i }} -eq 240 ]; then
             python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }}
           else
-            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Fallo detectado. Reintentando bloque secundario..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
+            python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Fallo detectado. Reintentando bloque..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
           fi
+
+      - name: Publicar lista de imágenes necesarias
+        # La lee herramientas/actualizar_imagenes.bat para saber qué imágenes bajar
+        if: matrix.rango.i == 0 && hashFiles('imagenes_necesarias.txt') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view imagenes-cache --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create imagenes-cache --repo "${{ github.repository }}" \
+              --title "Cache de imagenes (no borrar)" --latest=false \
+              --notes "ZIP con las imagenes de productos para los flyers. Lo actualiza herramientas/actualizar_imagenes.bat."
+          gh release upload imagenes-cache imagenes_necesarias.txt --clobber --repo "${{ github.repository }}"
+
+      - name: Mantener workflow activo
+        # GitHub desactiva los workflows programados tras 60 días sin commits.
+        # Re-habilitarlo en cada ejecución reinicia ese contador.
+        if: always() && matrix.rango.i == 0
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable flyer_automation.yml --repo "${{ github.repository }}"
