@@ -65,7 +65,6 @@ jobs:
       - name: Ejecutar Bloque (${{ matrix.rango.i }} - ${{ matrix.rango.f }})
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
-          GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
           PYTHONUNBUFFERED: 1
           PYTHONDONTWRITEBYTECODE: 1
           PYTHONIOENCODING: utf-8
@@ -93,6 +92,16 @@ jobs:
             python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }} || (echo ">>> Fallo detectado. Reintentando bloque..." && sleep 15 && python -u generar_flyers.py ${{ matrix.rango.i }} ${{ matrix.rango.f }})
           fi
 
+      - name: Guardar PDFs del bloque
+        # El job "publicar" junta los PDF de las 12 máquinas y los publica en GitHub Pages
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfs-${{ matrix.rango.i }}
+          path: docs/flyers/*.pdf
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 0 # los PDF ya están comprimidos
+
       - name: Publicar lista de imágenes necesarias
         # La lee herramientas/actualizar_imagenes.bat para saber qué imágenes bajar
         if: matrix.rango.i == 0 && hashFiles('imagenes_necesarias.txt') != ''
@@ -113,3 +122,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow enable generar_flyers_lento.yml --repo "${{ github.repository }}"
+
+  publicar:
+    # Publica en GitHub Pages los PDF de todas las tiendas. Si algún bloque falló, no se
+    # publica nada y queda la versión anterior del sitio (los links de FLYER_TIENDA siguen sirviendo).
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Juntar PDFs de los 12 bloques
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pdfs-*
+          path: docs/flyers
+          merge-multiple: true
+
+      - name: Resumen
+        run: |
+          echo "PDFs a publicar: $(ls docs/flyers/*.pdf | wc -l)"
+          du -sh docs/
+
+      - name: Subir a GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'docs/'
+
+      - name: Desplegar
+        uses: actions/deploy-pages@v4
