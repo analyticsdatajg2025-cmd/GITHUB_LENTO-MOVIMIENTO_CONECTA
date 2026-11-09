@@ -15,16 +15,16 @@ from collections import Counter
 from datetime import datetime, timedelta
 from oauth2client.service_account import ServiceAccountCredentials
 from concurrent.futures import ThreadPoolExecutor
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2.credentials import Credentials
+import urllib.parse
 
 # --- CONFIGURACIÓN VIP ---
 ANCHO, ALTO = 2500, 3750
 SHEET_ID = "1NQdhnPxgVe6N6LiVxh1ouzt5NHtqjR22EEqL6w1RpWQ"
-DRIVE_FOLDER_ID = "1UzcwDFTNDE3961roIbzDgOi88Xi_n66Y"
+# Los PDF se publican en GitHub Pages (antes iban a Google Drive, cuyo token OAuth vencía)
+URL_BASE_PAGES = "https://analyticsdatajg2025-cmd.github.io/GITHUB_LENTO-MOVIMIENTO_CONECTA/flyers/"
+PDF_ANCHO = 1000  # Ancho final de cada página (px): ~110 KB/pág para que todo LENTO quepa holgado en Pages (<1 GB)
 
-output_dir = "temp_flyers"
+output_dir = "docs/flyers"   # el workflow junta esta carpeta de las 12 máquinas y la publica
 cache_dir = "temp_cache_img"
 os.makedirs(output_dir, exist_ok=True)
 os.makedirs(cache_dir, exist_ok=True)
@@ -36,6 +36,7 @@ MESES_ES = {
     9: "Setiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 mes_actual = MESES_ES[ahora_global.month]
+VERSION_LINK = ahora_global.strftime("%Y%m%d%H%M")
 
 cache_memoria = {}
 
@@ -64,11 +65,7 @@ EFE_NARANJA, BLANCO, NEGRO, GRIS_MARCA = (255, 100, 0), (255, 255, 255), (0, 0, 
 def conectar_servicios():
     info_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
     creds_sheets = ServiceAccountCredentials.from_json_keyfile_dict(info_creds, ["https://spreadsheets.google.com/feeds"])
-    client_sheets = gspread.authorize(creds_sheets).open_by_key(SHEET_ID)
-    info_token = json.loads(os.environ['GOOGLE_TOKEN_JSON'])
-    creds_drive = Credentials.from_authorized_user_info(info_token)
-    service_drive = build('drive', 'v3', credentials=creds_drive)
-    return client_sheets, service_drive
+    return gspread.authorize(creds_sheets).open_by_key(SHEET_ID)
 
 def lectura_segura(client, nombre_hoja):
     for intento in range(5):
@@ -276,22 +273,7 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         draw.text((tx+area_w//2, ty_p+230), sku_val, font=f_sku, fill=BLANCO, anchor="mm")
     return flyer
 
-def gestionar_archivo_drive(service, file_path, file_name):
-    media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
-    query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
-    results = service.files().list(q=query, fields="files(id)").execute()
-    files = results.get('files', [])
-    if files:
-        file_id = files[0]['id']
-        service.files().update(fileId=file_id, media_body=media).execute()
-    else:
-        file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
-        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        file_id = file.get('id')
-    service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
-    return f"https://drive.google.com/uc?export=download&id={file_id}"
-
-def procesar_tienda_batch(data, service_drive):
+def procesar_tienda_batch(data):
     nombre, grupo = data
     try:
         prods = grupo.to_dict('records')
@@ -303,9 +285,9 @@ def procesar_tienda_batch(data, service_drive):
         num_total_prods = len(prods)
         num_pags = (num_total_prods // 6) + (1 if num_total_prods % 6 != 0 else 0)
         
-        # Ajustamos calidad para que el objeto de lista no sature la RAM
-        calidad_final = 33 if num_pags > 50 else 35
-        muestreo = 2 if num_pags > 50 else 1
+        # Compresión JPEG de cada página (calidad 40, croma 4:2:0) para que el sitio de Pages no pase de 1 GB
+        calidad_final = 40
+        muestreo = 2
         
         print(f">> Procesando {nombre}: {num_pags} páginas totales.")
 
@@ -313,7 +295,9 @@ def procesar_tienda_batch(data, service_drive):
         
         for i in range(0, len(prods), 6):
             pag_actual = (i//6) + 1
-            img_flyer = crear_flyer(prods[i:i+6], str(nombre), pag_actual).convert("RGB")
+            img_full = crear_flyer(prods[i:i+6], str(nombre), pag_actual)
+            img_flyer = img_full.convert("RGB").resize((PDF_ANCHO, int(ALTO * PDF_ANCHO / ANCHO)), Image.Resampling.LANCZOS)
+            img_full.close()
             
             # [!] OPTIMIZACIÓN: Reducimos la paleta de colores para que cada objeto 
             # en la lista ocupe 4 veces menos RAM antes del guardado final.
@@ -343,12 +327,9 @@ def procesar_tienda_batch(data, service_drive):
             del paginas_totales
             gc.collect()
             
-            # Subida a Drive
-            link = gestionar_archivo_drive(service_drive, local_path, fn)
-            
-            if os.path.exists(local_path): 
-                os.remove(local_path)
-                
+            # El PDF queda en docs/flyers y el workflow lo publica en GitHub Pages.
+            # ?v=fecha obliga al navegador a bajar la versión nueva y no la guardada en caché
+            link = f"{URL_BASE_PAGES}{urllib.parse.quote(fn)}?v={VERSION_LINK}"
             return [nombre, link]
             
     except Exception as e: 
@@ -361,19 +342,7 @@ def procesar_tienda_batch(data, service_drive):
     return None
 
 # --- FLUJO PRINCIPAL REFORMADO ---
-ss_client, drive_service = conectar_servicios()
-
-# Verificar el acceso a Google Drive ANTES de tocar el Sheet: si el token OAuth
-# (secret GOOGLE_TOKEN_JSON) venció, antes se vaciaba FLYER_TIENDA y luego fallaban
-# todas las subidas con "invalid_grant", dejando a las tiendas sin links.
-try:
-    drive_service.files().get(fileId=DRIVE_FOLDER_ID, fields="id", supportsAllDrives=True).execute()
-except Exception as e:
-    print(f"!!! ERROR: no hay acceso a la carpeta de Google Drive ({e}).")
-    if "invalid_grant" in str(e):
-        print("!!! El token de Google (secret GOOGLE_TOKEN_JSON) venció o fue revocado: hay que generarlo de nuevo.")
-    print("!!! No se toca el Sheet ni FLYER_TIENDA.")
-    sys.exit(1)
+ss_client = conectar_servicios()
 
 # [!] REGLA DE ORO: Escalonamiento inicial
 inicio = int(sys.argv[1]) if len(sys.argv) > 1 else 0
@@ -539,22 +508,14 @@ tienda_links = []
 batch_size = 2 
 
 for idx, data in enumerate(tiendas_a_procesar):
-    # Reintento de conexión por si el token parpadea (invalid_grant)
-    for intento_auth in range(2):
-        try:
-            res = procesar_tienda_batch(data, drive_service)
-            if res:
-                tienda_links.append(res)
-                if len(tienda_links) % batch_size == 0:
-                    ss_client.worksheet("FLYER_TIENDA").append_rows(tienda_links[-batch_size:])
-            break # Éxito en la tienda
-        except Exception as e:
-            if "invalid_grant" in str(e) and intento_auth == 0:
-                print("!!! Re-conectando servicios por token expirado...")
-                ss_client, drive_service = conectar_servicios() # Intenta re-conectar
-                continue
-            print(f"Error crítico en tienda {data[0]}: {e}")
-            break
+    try:
+        res = procesar_tienda_batch(data)
+        if res:
+            tienda_links.append(res)
+            if len(tienda_links) % batch_size == 0:
+                ss_client.worksheet("FLYER_TIENDA").append_rows(tienda_links[-batch_size:])
+    except Exception as e:
+        print(f"Error crítico en tienda {data[0]}: {e}")
     gc.collect() 
 
 # --- SECCIÓN FINAL CORREGIDA PARA ESCRITURA TOTAL ---
@@ -573,6 +534,6 @@ if tienda_links:
 
 fallidas = len(tiendas_a_procesar) - len(tienda_links)
 if fallidas:
-    print(f"!!! {fallidas} de {len(tiendas_a_procesar)} tiendas de este bloque NO se generaron o subieron. Revisa los errores arriba.")
+    print(f"!!! {fallidas} de {len(tiendas_a_procesar)} tiendas de este bloque NO se generaron. Revisa los errores arriba.")
     sys.exit(1)
 print(f">> PROCESO COMPLETADO CON ÉXITO ({len(tienda_links)} tiendas).")
