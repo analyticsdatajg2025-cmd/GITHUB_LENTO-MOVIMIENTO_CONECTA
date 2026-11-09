@@ -1,4 +1,4 @@
-name: Generar Flyers Automaticamente
+name: Generar Flyers Lento Movimiento
 
 on:
   schedule:
@@ -9,11 +9,11 @@ on:
     paths: # solo cuando cambia el proceso, no por documentación o herramientas
       - 'generar_flyers.py'
       - 'requirements.txt'
-      - '.github/workflows/flyer_automation.yml'
+      - '.github/workflows/generar_flyers_lento.yml'
 
 # Evita que dos ejecuciones (p. ej. push + programada) escriban el Sheet al mismo tiempo
 concurrency:
-  group: flyers-lento-v2 # v2: el grupo anterior quedó trabado por una ejecución fantasma (09/11)
+  group: flyers-lento-v3
   cancel-in-progress: false
 
 jobs:
@@ -112,4 +112,4 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow enable flyer_automation.yml --repo "${{ github.repository }}"
+        run: gh workflow enable generar_flyers_lento.yml --repo "${{ github.repository }}"

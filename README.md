@@ -2,7 +2,7 @@
 Automatización de catálogos (PDF por tienda) para los productos que tienen lento movimiento.
 
 ## Cómo funciona
-- **Workflow** `.github/workflows/flyer_automation.yml`: corre todos los días a las 3 PM (Perú),
+- **Workflow** `.github/workflows/generar_flyers_lento.yml`: corre todos los días a las 3 PM (Perú),
   a mano (*Actions → Run workflow*) o al cambiar el script. Reparte las tiendas en 12 máquinas.
 - **Datos** (Google Sheet `1NQdhnPx…`): `Origen Tdas` (inventario por mes), `TiendasxLista`
   (lista de precios de cada tienda), `Promo01/03/04` (precios), `listado_productos` (imagen de cada SKU).
