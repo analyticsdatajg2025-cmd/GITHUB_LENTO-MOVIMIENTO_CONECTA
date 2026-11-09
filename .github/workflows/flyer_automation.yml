@@ -13,7 +13,7 @@ on:
 
 # Evita que dos ejecuciones (p. ej. push + programada) escriban el Sheet al mismo tiempo
 concurrency:
-  group: flyers-lento
+  group: flyers-lento-v2 # v2: el grupo anterior quedó trabado por una ejecución fantasma (09/11)
   cancel-in-progress: false
 
 jobs:
