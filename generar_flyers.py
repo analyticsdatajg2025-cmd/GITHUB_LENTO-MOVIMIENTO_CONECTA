@@ -15,16 +15,20 @@ from collections import Counter
 from datetime import datetime, timedelta
 from oauth2client.service_account import ServiceAccountCredentials
 from concurrent.futures import ThreadPoolExecutor
-import urllib.parse
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 
 # --- CONFIGURACIÓN VIP ---
 ANCHO, ALTO = 2500, 3750
 SHEET_ID = "1NQdhnPxgVe6N6LiVxh1ouzt5NHtqjR22EEqL6w1RpWQ"
-# Los PDF se publican en GitHub Pages (antes iban a Google Drive, cuyo token OAuth vencía)
-URL_BASE_PAGES = "https://analyticsdatajg2025-cmd.github.io/GITHUB_LENTO-MOVIMIENTO_CONECTA/flyers/"
-PDF_ANCHO = 1000  # Ancho final de cada página (px): ~110 KB/pág para que todo LENTO quepa holgado en Pages (<1 GB)
+# Carpeta de Drive con los PDF. Cada tienda conserva SIEMPRE el mismo archivo (se actualiza por nombre),
+# así los links publicados en lacuracao.pe/lm no cambian.
+DRIVE_FOLDER_ID = "1UzcwDFTNDE3961roIbzDgOi88Xi_n66Y"
+PDF_ANCHO = 1600  # Ancho final de cada página (px): PDF más livianos para descargar en tienda
 
-output_dir = "docs/flyers"   # el workflow junta esta carpeta de las 12 máquinas y la publica
+output_dir = "temp_flyers"
 cache_dir = "temp_cache_img"
 os.makedirs(output_dir, exist_ok=True)
 os.makedirs(cache_dir, exist_ok=True)
@@ -36,7 +40,6 @@ MESES_ES = {
     9: "Setiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 mes_actual = MESES_ES[ahora_global.month]
-VERSION_LINK = ahora_global.strftime("%Y%m%d%H%M")
 
 cache_memoria = {}
 
@@ -62,10 +65,39 @@ LC_AMARILLO, LC_AMARILLO_OSCURO = (255, 203, 5), (235, 180, 0)
 EFE_AZUL, EFE_AZUL_OSCURO = (0, 107, 213), (0, 60, 150)
 EFE_NARANJA, BLANCO, NEGRO, GRIS_MARCA = (255, 100, 0), (255, 255, 255), (0, 0, 0), (100, 100, 100)
 
-def conectar_servicios():
+DRIVE_SCOPE = ["https://www.googleapis.com/auth/drive"]
+
+def conectar_sheets():
     info_creds = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
     creds_sheets = ServiceAccountCredentials.from_json_keyfile_dict(info_creds, ["https://spreadsheets.google.com/feeds"])
     return gspread.authorize(creds_sheets).open_by_key(SHEET_ID)
+
+def conectar_drive():
+    """Devuelve (servicio, modo). Prueba primero el token personal (GOOGLE_TOKEN_JSON, puede crear
+    archivos nuevos) y, si no existe o venció, la cuenta de servicio de GOOGLE_SHEETS_JSON
+    (no vence; puede actualizar los PDF existentes si la carpeta está compartida con ella)."""
+    errores = []
+    token = os.environ.get('GOOGLE_TOKEN_JSON', '').strip()
+    if token:
+        try:
+            srv = build('drive', 'v3', credentials=Credentials.from_authorized_user_info(json.loads(token)), cache_discovery=False)
+            srv.files().get(fileId=DRIVE_FOLDER_ID, fields="id", supportsAllDrives=True).execute()
+            return srv, "token personal"
+        except Exception as e:
+            errores.append(f"token personal (GOOGLE_TOKEN_JSON): {e}")
+    info = json.loads(os.environ['GOOGLE_SHEETS_JSON'])
+    try:
+        creds = service_account.Credentials.from_service_account_info(info, scopes=DRIVE_SCOPE)
+        srv = build('drive', 'v3', credentials=creds, cache_discovery=False)
+        srv.files().get(fileId=DRIVE_FOLDER_ID, fields="id", supportsAllDrives=True).execute()
+        return srv, "cuenta de servicio"
+    except Exception as e:
+        errores.append(f"cuenta de servicio {info.get('client_email')}: {e}")
+    print("!!! ERROR: no hay acceso a la carpeta de Google Drive de los catálogos.")
+    for err in errores: print(f"!!!   - {err}")
+    print(f"!!! Solución: comparte la carpeta de Drive con {info.get('client_email')} como Editor")
+    print("!!! (o genera un token nuevo en el secret GOOGLE_TOKEN_JSON). No se toca el Sheet ni FLYER_TIENDA.")
+    sys.exit(1)
 
 def lectura_segura(client, nombre_hoja):
     for intento in range(5):
@@ -273,7 +305,31 @@ def crear_flyer(productos, tienda_nombre, num_pag):
         draw.text((tx+area_w//2, ty_p+230), sku_val, font=f_sku, fill=BLANCO, anchor="mm")
     return flyer
 
-def procesar_tienda_batch(data):
+def gestionar_archivo_drive(service, file_path, file_name):
+    """Actualiza el PDF existente de la tienda (mismo id, mismo link). Solo crea uno si no existe."""
+    media = MediaFileUpload(file_path, mimetype='application/pdf', resumable=True)
+    query = f"name = '{file_name}' and '{DRIVE_FOLDER_ID}' in parents and trashed = false"
+    files = service.files().list(q=query, fields="files(id)", supportsAllDrives=True,
+                                 includeItemsFromAllDrives=True).execute().get('files', [])
+    if files:
+        file_id = files[0]['id']
+        service.files().update(fileId=file_id, media_body=media, supportsAllDrives=True).execute()
+    else:
+        try:
+            file = service.files().create(body={'name': file_name, 'parents': [DRIVE_FOLDER_ID]},
+                                          media_body=media, fields='id', supportsAllDrives=True).execute()
+        except Exception as e:
+            if "storageQuota" in str(e) or "quota" in str(e).lower():
+                raise RuntimeError(f"tienda nueva: la cuenta de servicio no puede CREAR {file_name} en Drive. "
+                                   "Sube una vez un PDF con ese nombre a la carpeta (o renueva GOOGLE_TOKEN_JSON) "
+                                   "y desde ahí se actualizará solo.") from e
+            raise
+        file_id = file.get('id')
+        service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'},
+                                     supportsAllDrives=True).execute()
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+
+def procesar_tienda_batch(data, service_drive):
     nombre, grupo = data
     try:
         prods = grupo.to_dict('records')
@@ -285,7 +341,7 @@ def procesar_tienda_batch(data):
         num_total_prods = len(prods)
         num_pags = (num_total_prods // 6) + (1 if num_total_prods % 6 != 0 else 0)
         
-        # Compresión JPEG de cada página (calidad 40, croma 4:2:0) para que el sitio de Pages no pase de 1 GB
+        # Compresión JPEG de cada página (calidad 40, croma 4:2:0): PDF livianos para descargar en tienda
         calidad_final = 40
         muestreo = 2
         
@@ -327,9 +383,10 @@ def procesar_tienda_batch(data):
             del paginas_totales
             gc.collect()
             
-            # El PDF queda en docs/flyers y el workflow lo publica en GitHub Pages.
-            # ?v=fecha obliga al navegador a bajar la versión nueva y no la guardada en caché
-            link = f"{URL_BASE_PAGES}{urllib.parse.quote(fn)}?v={VERSION_LINK}"
+            # Subida a Drive: actualiza el mismo archivo, el link no cambia
+            link = gestionar_archivo_drive(service_drive, local_path, fn)
+            if os.path.exists(local_path):
+                os.remove(local_path)
             return [nombre, link]
             
     except Exception as e: 
@@ -342,7 +399,10 @@ def procesar_tienda_batch(data):
     return None
 
 # --- FLUJO PRINCIPAL REFORMADO ---
-ss_client = conectar_servicios()
+ss_client = conectar_sheets()
+# Verificar el acceso a Drive ANTES de tocar el Sheet (si no hay acceso, se detiene sin vaciar FLYER_TIENDA)
+drive_service, modo_drive = conectar_drive()
+print(f">> Google Drive: acceso OK usando {modo_drive}.")
 
 # [!] REGLA DE ORO: Escalonamiento inicial
 inicio = int(sys.argv[1]) if len(sys.argv) > 1 else 0
@@ -509,7 +569,7 @@ batch_size = 2
 
 for idx, data in enumerate(tiendas_a_procesar):
     try:
-        res = procesar_tienda_batch(data)
+        res = procesar_tienda_batch(data, drive_service)
         if res:
             tienda_links.append(res)
             if len(tienda_links) % batch_size == 0:
@@ -534,6 +594,6 @@ if tienda_links:
 
 fallidas = len(tiendas_a_procesar) - len(tienda_links)
 if fallidas:
-    print(f"!!! {fallidas} de {len(tiendas_a_procesar)} tiendas de este bloque NO se generaron. Revisa los errores arriba.")
+    print(f"!!! {fallidas} de {len(tiendas_a_procesar)} tiendas de este bloque NO se generaron o subieron. Revisa los errores arriba.")
     sys.exit(1)
 print(f">> PROCESO COMPLETADO CON ÉXITO ({len(tienda_links)} tiendas).")
