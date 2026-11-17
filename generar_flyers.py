@@ -19,6 +19,10 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
+import resumen as R  # resumen de la ejecución para el monitor de MKT SISTEMA
+
+# Cada máquina anota su bloque de tiendas (argumentos inicio fin); la 0 anota además mes e imágenes
+R.iniciar("lento", bloque=f"{sys.argv[1]}-{sys.argv[2]}" if len(sys.argv) > 2 else "0-999")
 
 # --- CONFIGURACIÓN VIP ---
 ANCHO, ALTO = 2500, 3750
@@ -97,6 +101,7 @@ def conectar_drive():
     for err in errores: print(f"!!!   - {err}")
     print(f"!!! Solución: comparte la carpeta de Drive con {info.get('client_email')} como Editor")
     print("!!! (o genera un token nuevo en el secret GOOGLE_TOKEN_JSON). No se toca el Sheet ni FLYER_TIENDA.")
+    R.error(f"Sin acceso a la carpeta de Google Drive: compártela con {info.get('client_email')} como Editor.")
     sys.exit(1)
 
 def lectura_segura(client, nombre_hoja):
@@ -329,6 +334,8 @@ def gestionar_archivo_drive(service, file_path, file_name):
                                      supportsAllDrives=True).execute()
     return f"https://drive.google.com/uc?export=download&id={file_id}"
 
+ERRORES_TIENDA = {}  # tienda -> motivo, para el resumen
+
 def procesar_tienda_batch(data, service_drive):
     nombre, grupo = data
     try:
@@ -391,6 +398,7 @@ def procesar_tienda_batch(data, service_drive):
             
     except Exception as e: 
         print(f"!!! ERROR CRÍTICO EN {nombre}: {e}")
+        ERRORES_TIENDA[str(nombre)] = f"{type(e).__name__}: {e}"
         if 'paginas_totales' in locals():
             for p in paginas_totales: p.close()
             del paginas_totales
@@ -468,6 +476,8 @@ if mes_actual not in meses_cargados:
     mes_usado = next((m for m in anteriores if m in meses_cargados), None)
     print(f"!!! AVISO: no hay datos de {mes_actual} en 'Origen Tdas'. Se usa el último mes cargado: {mes_usado}.")
 df_final = df_origen[mes_col == mes_usado].copy()
+R.dato(mes_actual=mes_actual, mes_usado=mes_usado or "", meses_cargados=meses_cargados,
+       data_actualizada=mes_usado == mes_actual)
 if not df_final.empty:
     df_final = df_final[df_final.apply(validar_existencia, axis=1)]
 
@@ -477,6 +487,7 @@ if df_final.empty:
     # Antes el script seguía, vaciaba FLYER_TIENDA y caía con KeyError: 'Tienda'
     print("!!! ERROR: 0 productos tras el filtro. Revisa 'Origen Tdas' (columna Mes), TiendasxLista y Promo01/03/04.")
     print("!!! No se toca el Sheet ni FLYER_TIENDA para conservar los catálogos anteriores.")
+    R.error("0 productos con stock y precio tras el filtro (revisa Origen Tdas, TiendasxLista y Promo01/03/04).")
     sys.exit(1)
 
 # Lista de imágenes para herramientas/actualizar_imagenes.bat (la sube la máquina 0 al release)
@@ -485,6 +496,11 @@ if inicio == 0:
     with open(LISTA_NECESARIAS, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(urls_necesarias) + "\n")
     print(f">> {len(urls_necesarias)} imágenes necesarias escritas en {LISTA_NECESARIAS}")
+    # Faltantes = las que no están en la caché que sube la herramienta de la laptop
+    sin_cache = sum(1 for u in urls_necesarias
+                    if not os.path.exists(os.path.join(CARPETA_CACHE_LAPTOP, hashlib.md5(u.encode()).hexdigest() + ".jpg")))
+    R.dato(imagenes_total=len(urls_necesarias), imagenes_faltantes=sin_cache,
+           productos_sin_imagen=int((df_final['image_link'] == '').sum()))
 
 # [!] ACTUALIZACIÓN DE HOJA MAESTRA (Solo la primera máquina)
 if inicio == 0:
@@ -532,12 +548,14 @@ if inicio == 0:
 
 tiendas_procesadas = list(df_final.groupby('Tienda'))
 total_reales = len(tiendas_procesadas)
+R.dato(total_tiendas=total_reales, productos_total=len(df_final))
 
 if len(sys.argv) > 2:
     inicio, fin = int(sys.argv[1]), int(sys.argv[2])
     # Validación Senior: Si el inicio es mayor al total, cerramos con éxito
     if inicio >= total_reales:
         print(f">>> [!] AVISO: El inicio {inicio} supera el total de tiendas ({total_reales}). Nada que hacer.")
+        R.dato(bloque_vacio=True)
         sys.exit(0)
     
     fin = min(fin, total_reales)
@@ -571,11 +589,16 @@ for idx, data in enumerate(tiendas_a_procesar):
     try:
         res = procesar_tienda_batch(data, drive_service)
         if res:
+            R.tienda(data[0], True, len(data[1]), url=res[1])
+        else:
+            R.tienda(data[0], False, len(data[1]), error_txt=ERRORES_TIENDA.get(str(data[0]), "No se generó el PDF"))
+        if res:
             tienda_links.append(res)
             if len(tienda_links) % batch_size == 0:
                 ss_client.worksheet("FLYER_TIENDA").append_rows(tienda_links[-batch_size:])
     except Exception as e:
         print(f"Error crítico en tienda {data[0]}: {e}")
+        R.tienda(data[0], False, len(data[1]), error_txt=f"{type(e).__name__}: {e}")
     gc.collect() 
 
 # --- SECCIÓN FINAL CORREGIDA PARA ESCRITURA TOTAL ---
@@ -595,5 +618,6 @@ if tienda_links:
 fallidas = len(tiendas_a_procesar) - len(tienda_links)
 if fallidas:
     print(f"!!! {fallidas} de {len(tiendas_a_procesar)} tiendas de este bloque NO se generaron o subieron. Revisa los errores arriba.")
+    R.error(f"{fallidas} de {len(tiendas_a_procesar)} tiendas del bloque no se generaron o subieron.")
     sys.exit(1)
 print(f">> PROCESO COMPLETADO CON ÉXITO ({len(tienda_links)} tiendas).")

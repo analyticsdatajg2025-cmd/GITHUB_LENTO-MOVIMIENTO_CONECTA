@@ -22,3 +22,10 @@ Automatización de catálogos (PDF por tienda) para los productos que tienen len
 - Secret `GOOGLE_TOKEN_JSON` (opcional): token OAuth personal. Solo hace falta para CREAR el PDF de una tienda
   nueva; si no está o venció, se usa la cuenta de servicio (y para una tienda nueva basta subir una vez a la
   carpeta un PDF cualquiera con el nombre `LENTO_<tienda>.pdf`).
+
+## Resumen para MKT SISTEMA
+- Cada máquina anota su bloque en `resumen.json` (`resumen.py`: tiendas OK/error, productos, link del PDF;
+  la máquina 0 además mes usado, si la data está al día e imágenes faltantes).
+- El paso «Publicar resumen para MKT SISTEMA» lo sube al release `resumenes` como
+  `lento_<run_id>_<bloque>.json`. MKT SISTEMA (módulo «Lento y Obsoletos») lo lee y lo guarda 30 días.
+  Los archivos de más de 5 días se borran solos del release. Este paso nunca hace fallar el job.
