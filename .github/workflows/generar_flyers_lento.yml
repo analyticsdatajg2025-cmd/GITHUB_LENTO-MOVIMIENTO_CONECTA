@@ -63,6 +63,7 @@ jobs:
           fi
 
       - name: Ejecutar Bloque (${{ matrix.rango.i }} - ${{ matrix.rango.f }})
+        id: script
         env:
           GOOGLE_SHEETS_JSON: ${{ secrets.GOOGLE_SHEETS_JSON }}
           GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }} # opcional: si venció se usa la cuenta de servicio
@@ -104,6 +105,31 @@ jobs:
               --title "Cache de imagenes (no borrar)" --latest=false \
               --notes "ZIP con las imagenes de productos para los flyers. Lo actualiza herramientas/actualizar_imagenes.bat."
           gh release upload imagenes-cache imagenes_necesarias.txt --clobber --repo "${{ github.repository }}"
+
+      - name: Publicar resumen para MKT SISTEMA
+        # Solo informa: el monitor «Lento y Obsoletos» de MKT SISTEMA junta los JSON de las 12 máquinas
+        # desde el release «resumenes». Corre siempre y nunca hace fallar el job.
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUMEN_PROCESO: lento
+          RESUMEN_BLOQUE: ${{ matrix.rango.i }}-${{ matrix.rango.f }}
+        run: |
+          python3 resumen.py cerrar "${{ steps.script.outcome }}"
+          R="${{ github.repository }}"
+          gh release view resumenes --repo "$R" >/dev/null 2>&1 || \
+            gh release create resumenes --repo "$R" --title "Resumenes de ejecucion (no borrar)" --latest=false \
+              --notes "Un JSON por maquina y ejecucion con el resumen que lee MKT SISTEMA. Se limpian solos a los 5 dias." || true
+          ARCH="lento_${GITHUB_RUN_ID}_${{ matrix.rango.i }}.json"
+          cp resumen.json "$ARCH"
+          for i in 1 2 3; do gh release upload resumenes "$ARCH" --clobber --repo "$R" && break; sleep $((5 * i)); done
+          # La máquina 0 borra los de más de 5 días (MKT SISTEMA ya los guardó y los conserva 30 días)
+          if [ ${{ matrix.rango.i }} -eq 0 ]; then
+            LIMITE=$(date -u -d '5 days ago' +%Y-%m-%dT%H:%M:%SZ)
+            gh api --paginate "repos/$R/releases/tags/resumenes" --jq ".assets[] | select(.updated_at < \"$LIMITE\") | .id" | \
+              while read -r id; do gh api -X DELETE "repos/$R/releases/assets/$id" || true; done
+          fi
 
       - name: Mantener workflow activo
         # GitHub desactiva los workflows programados tras 60 días sin commits.
